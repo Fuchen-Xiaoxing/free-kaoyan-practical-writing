@@ -241,5 +241,57 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("建议转为休眠 (dormant) 条目", res.stdout)
         self.assertIn("建议软删除退役 (retired) 条目", res.stdout)
 
+    def test_09_genre_normalization_and_anchor_query(self):
+        """Test genre aliasing (e.g. suggestion -> advice) in anchor and query."""
+        res_anchor = self.run_cmd(["anchor", "--genre", "suggestion"])
+        self.assertEqual(res_anchor.returncode, 0, f"anchor --genre suggestion failed: {res_anchor.stderr}")
+        self.assertIn("2021 English I · advice", res_anchor.stdout)
+
+        res_query = self.run_cmd(["query", "--genre", "suggestion", "--limit", "3"])
+        self.assertEqual(res_query.returncode, 0, f"query --genre suggestion failed: {res_query.stderr}")
+        # Morphemes must not include library noise
+        self.assertNotIn("消费者维权", res_query.stdout)
+
+    def test_10_check_essay_command(self):
+        """Test 'check-essay' CLI diagnoses word count, ratio, contractions, exclamation, and format."""
+        # 1. Clean essay
+        clean_essay = (
+            "Dear Li Ming,\n\n"
+            "    Hearing that you have been admitted to a university, I am writing to extend my congratulations "
+            "and offer some suggestions for your transition to campus life.\n"
+            "    In daily life, it is crucial to cultivate self-reliance, as you will live without your parents' care. "
+            "To begin with, learning to manage your monthly living expenses keeps your budget in check. "
+            "Moreover, getting along well with your roommates will spare you needless dormitory conflicts. "
+            "As for study, exploring your major in advance will pay off, covering the courses awaiting you "
+            "and career prospects after graduation.\n"
+            "    Finally, I wish you a rewarding university life filled with happiness and knowledge.\n\n"
+            "Best regards,\n"
+            "Li Ming"
+        )
+        res_clean = self.run_cmd(["check-essay", "--text", clean_essay, "--json"])
+        self.assertEqual(res_clean.returncode, 0, f"check-essay clean failed: {res_clean.stderr}")
+        data_clean = json.loads(res_clean.stdout)
+        self.assertEqual(data_clean["body_total"], 105)
+        self.assertEqual(data_clean["word_count_status"], "PASS")
+        self.assertEqual(len(data_clean["contractions"]), 0)
+        self.assertEqual(data_clean["exclamations"], 0)
+        self.assertEqual(len(data_clean["format_issues"]), 0)
+
+        # 2. Flawed essay
+        flawed_essay = (
+            "Dear Li Ming:\n\n"
+            "    I'm writing to say congratulations! You'd better prepare early.\n"
+            "    Don't forget to wash clothes.\n"
+            "    Hoping you happy.\n\n"
+            "Best regards\n"
+            "Li Ming."
+        )
+        res_flawed = self.run_cmd(["check-essay", "--text", flawed_essay, "--json"])
+        self.assertEqual(res_flawed.returncode, 0, f"check-essay flawed failed: {res_flawed.stderr}")
+        data_flawed = json.loads(res_flawed.stdout)
+        self.assertGreater(len(data_flawed["contractions"]), 0)
+        self.assertEqual(data_flawed["exclamations"], 1)
+        self.assertGreater(len(data_flawed["format_issues"]), 0)
+
 if __name__ == "__main__":
     unittest.main()

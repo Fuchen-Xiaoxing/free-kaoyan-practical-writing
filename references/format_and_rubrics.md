@@ -54,13 +54,13 @@ Li Ming
    - 顶格书写，**末尾必须是英文逗号（`,`），坚决禁止使用中文冒号（`:`）**；
    - 致特定已知收件人：`Dear Professor Wang,` / `Dear Mr. Smith,` / `Dear Curator,`（致馆长：*严禁加定冠词 the，首字母大写*）；
    - 致未知/机构负责人：`Dear Sir or Madam,`（*严禁写斜杠 `Dear Sir/Madam`，严禁写复数 `Dear Sirs`*）；
-   - 致同侪熟人：`Dear Jack,` / `Dear David,` / `Dear Paul,` / `Dear Friends,`。
+   - 致同侪熟人：`Dear Friends,` / `Dear Classmates,` / `Dear John,`（使用同辈常用亲切称呼）。
 2. **正文段落（Body Paragraphs）**：
    - **首行缩进 4 个英文字符（约 1 个制表位）**；
    - **段落与段落之间【坚决不空行】**（缩进式排版铁律；若齐头式才空行，但考研标准统一使用缩进式不空行，节省宝贵卷面行数）。
 3. **结尾敬语（Complimentary Close）**：
    - 顶格书写，末尾必须加**英文逗号（`,`）**；
-   - **致同侪好友/留学生同学（Jack/Paul/Jane等）**：**必须使用 `Best regards,` / `Warmest regards,` / `Yours,`**；
+   - **致同侪好友/同辈同学**：**必须使用 `Best regards,` / `Warmest regards,` / `Yours,`**；
      - 🚨 **生死红线**：对同学同侪坚决严禁使用 `Yours sincerely,`（过于官僚，语域不匹配扣分）；
    - **致上位者/师长/官方/商务（Professor/Mr./Curator/Sir or Madam）**：使用 `Yours sincerely,` / `Yours faithfully,`。
 4. **署名（Signature）**：
@@ -178,8 +178,8 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
    - **核心议题与宗旨**：如 `cross-cultural academic exchange`，用具体动词说明目的；
    - **角色期望与分工**：如 `serve as a guest speaker to share your insights`。
 2. **严禁无中生有的画蛇添足（扣分重灾区）**：
-   - ❌ **严禁虚构未提及的附件/议程/会议ID**：题干未提及任何附件或技术参数时，坚决不要写 `Enclosed is the tentative agenda` 或 `Meeting ID: 123456`，阅卷人会判定为盲目套用商业模板、内容脱离题干；
-   - ❌ **严禁脱离受众身份生搬硬套**：收信人为同班同窗时，严禁使用 19 世纪维多利亚式老派外交辞令（如 `favor us with a reply`），应使用自然体面的现代同侪确认句（如 `I would be thrilled if you could join us`）；
+   - ❌ **严禁虚构未提及的附件/日程/技术参数**：题干未提示任何附件或具体技术参数时，坚决不要套写附件说明（如 `Enclosed is...`）或编造具体参数编号，阅卷人会判定为生硬套用公文模板、脱离题干；
+   - ❌ **严禁脱离受众身份生搬硬套**：收信人为同班同窗时，严禁使用陈旧僵化的公文外交套话，应使用自然得体的现代同侪书信表达；
    - ❌ **严禁过度假设与节外生枝**：不要额外编造与题干毫无关系的冗长背景故事，严格以 2-6-2 黄金结构推进。
 
 ---
@@ -193,7 +193,7 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 4. **感叹号数**：= 0（全篇 0 个 !）；
 5. **超纲词数**：= 0（紧扣考纲核心动词短语）；
 6. **采分点覆盖率**：= 100%（逐条覆盖题干 Bullet Points）；
-7. **无中生有数**：= 0（零虚构附件/日程/会议ID）。
+7. **无中生有数**：= 0（零虚构未提示的技术参数/附件/日程）。
 
 ### 考场交卷前 60 秒自查清单：
 - [ ] **称呼标点**：最后是英文逗号 `,`，绝无中文冒号 `:`

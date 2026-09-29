@@ -57,6 +57,28 @@ SCENARIO_CODE_MAP = {
     "文化交流与文旅推荐": "CUL"
 }
 
+# Genre aliases for robust user/LLM input normalization
+GENRE_ALIASES = {
+    "suggestion": "advice",
+    "advise": "advice",
+    "recommend": "recommendation",
+    "invite": "invitation",
+    "apologize": "apology",
+    "complain": "complaint",
+    "apply": "application",
+    "thank": "gratitude",
+    "thanks": "gratitude",
+    "announcement": "notice",
+    "meeting_minutes": "minutes",
+    "memo": "minutes"
+}
+
+def normalize_genre(genre: str) -> str:
+    if not genre:
+        return ""
+    g = str(genre).lower().strip()
+    return GENRE_ALIASES.get(g, g)
+
 # Scenario relevance mapping for genres to eliminate cross-scenario noise
 GENRE_TO_SCENARIOS = {
     "invitation": ["校园文体、学术讲座与国际研讨会", "文化交流与文旅推荐", "志愿服务与校园公益"],
@@ -218,7 +240,7 @@ def cmd_anchor(args):
     paths = get_paths(kb_dir)
     anchors = read_jsonl(paths["anchors"])
 
-    genre_target = args.genre.lower().strip() if args.genre else None
+    genre_target = normalize_genre(args.genre) if args.genre else None
     year_target = str(args.year).strip() if args.year else None
 
     matches = []
@@ -296,7 +318,7 @@ def cmd_query(args):
     results = []
 
     target_type = args.type.lower()
-    genre_filter = args.genre.lower().strip() if args.genre else None
+    genre_filter = normalize_genre(args.genre) if args.genre else None
     scenario_filter = args.scenario.lower().strip() if args.scenario else None
     status_filter = args.status.strip() if args.status else None
     section_filter = args.section.lower().strip() if getattr(args, "section", None) else None
@@ -317,7 +339,7 @@ def cmd_query(args):
             if item.get("exam_band") == "超纲":
                 continue
 
-            item_genre = str(item.get("genre", "")).lower()
+            item_genre = normalize_genre(item.get("genre", ""))
             if genre_filter:
                 if genre_filter != item_genre and item_genre not in ("general", "common", "all", "shared"):
                     continue
@@ -784,6 +806,8 @@ def cmd_batch_update(args):
                 item["register"] = "neutral_formal"
             if "exam_band" not in item:
                 item["exam_band"] = "大纲内"
+            if "genre" in item:
+                item["genre"] = normalize_genre(item["genre"])
 
             used_in = [task_id] if task_id else []
             if "history" not in item or not isinstance(item["history"], dict):
@@ -872,7 +896,7 @@ def cmd_archive(args):
     archives_dir.mkdir(parents=True, exist_ok=True)
 
     title = args.title.strip()
-    genre = args.genre.strip() if args.genre else "general"
+    genre = normalize_genre(args.genre) if args.genre else "general"
     task_id = getattr(args, "task_id", None) or f"T{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
     exam_type = getattr(args, "exam_type", None) or "考研小作文"
 
@@ -891,7 +915,13 @@ def cmd_archive(args):
         sys.exit(1)
 
     metadata = {}
-    if args.metadata:
+    if getattr(args, "metadata_file", None):
+        try:
+            with open(args.metadata_file, "r", encoding="utf-8") as mf:
+                metadata = json.load(mf)
+        except Exception as e:
+            print(f"[WARN] Failed to load metadata from file: {e}", file=sys.stderr)
+    elif args.metadata:
         try:
             metadata = json.loads(args.metadata)
         except Exception:
@@ -1206,6 +1236,151 @@ def cmd_verify(args):
         print(f"\n=== 验证通过！共计有效条目: {total_valid} 条 ===")
         sys.exit(0)
 
+def cmd_check_essay(args):
+    content = args.text
+    if not content and args.file:
+        with open(args.file, "r", encoding="utf-8") as f:
+            content = f.read()
+    elif not content:
+        content = sys.stdin.read()
+
+    if not content or not content.strip():
+        print("[ERROR] 作文内容不能为空。", file=sys.stderr)
+        sys.exit(1)
+
+    raw_lines = [l.strip() for l in content.strip().splitlines() if l.strip()]
+    if not raw_lines:
+        print("[ERROR] 未检测到有效文本内容。", file=sys.stderr)
+        sys.exit(1)
+
+    salutation = None
+    signoff = []
+
+    # Salutation detector
+    first_line = raw_lines[0]
+    if re.match(r'^(dear\b|to\b|notice\b|announcement\b)', first_line, re.IGNORECASE):
+        salutation = first_line
+        candidate_lines = raw_lines[1:]
+    else:
+        candidate_lines = raw_lines[:]
+
+    # Signoff detector (from the bottom)
+    signoff_patterns = [
+        r'^(best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
+        r'^(li\s+ming|zhang\s+wei|wang\s+hua)[,\.]?$',
+        r'^(the\s+student\s+union|postgraduate\s+association)[,\.]?$'
+    ]
+
+    while candidate_lines:
+        last = candidate_lines[-1]
+        is_signoff = False
+        for pat in signoff_patterns:
+            if re.match(pat, last, re.IGNORECASE):
+                is_signoff = True
+                break
+        if is_signoff:
+            signoff.insert(0, candidate_lines.pop())
+        else:
+            break
+
+    body_paragraphs = candidate_lines
+
+    # Word counts
+    p_counts = [len(p.split()) for p in body_paragraphs]
+    body_total = sum(p_counts)
+    total_words = len(content.split())
+
+    # Ratios
+    ratios = [round(c / body_total * 10, 1) if body_total > 0 else 0 for c in p_counts]
+    ratio_str = " : ".join(str(r) for r in ratios) if ratios else "无"
+
+    # Contraction check
+    contraction_pattern = re.compile(
+        r"\b([a-zA-Z]+'([a-zA-Z]{1,2}))\b",
+        re.IGNORECASE
+    )
+    contractions_found = []
+    for line_no, line in enumerate(content.splitlines(), 1):
+        for m in contraction_pattern.finditer(line):
+            contractions_found.append((line_no, m.group(0)))
+
+    # Exclamation check
+    exclamation_count = content.count("!")
+
+    # Format checks
+    format_issues = []
+    if salutation:
+        if salutation.endswith(":") or salutation.endswith("："):
+            format_issues.append(f"称呼误用冒号（'{salutation}'），考研公文一律使用英文半角逗号")
+        elif salutation.endswith("，"):
+            format_issues.append(f"称呼误用中文全角逗号（'{salutation}'），必须使用英文半角逗号")
+        elif not salutation.endswith(","):
+            format_issues.append(f"称呼末尾缺少英文逗号（'{salutation}'）")
+
+    for s_line in signoff:
+        if re.match(r'^(best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours)', s_line, re.IGNORECASE):
+            if not s_line.endswith(","):
+                format_issues.append(f"结语敬语缺少英文逗号（'{s_line}'）")
+        if re.match(r'^(li\s+ming)', s_line, re.IGNORECASE):
+            if s_line.endswith("."):
+                format_issues.append(f"署名误加句号（'{s_line}'），署名严禁加句号")
+
+    # Word count safety assessment
+    wc_status = "PASS"
+    if 90 <= body_total <= 110:
+        wc_desc = f"【严格通过】正文 {body_total} 词，处于 90~110 词黄金满分安全区间"
+    elif body_total < 90:
+        wc_status = "WARN"
+        wc_desc = f"【偏少风险】正文 {body_total} 词（不足 90 词），建议适度丰富次段支撑细节"
+    elif body_total <= 120:
+        wc_status = "WARN"
+        wc_desc = f"【偏多微险】正文 {body_total} 词（略超 110 词），建议执行减法精炼"
+    else:
+        wc_status = "FAIL"
+        wc_desc = f"【严重超标】正文 {body_total} 词（已超出 110 词安全线），务必执行减法得分律替换精简"
+
+    p_detail = " | ".join(f"P{i+1}: {c} 词" for i, c in enumerate(p_counts))
+
+    if args.json:
+        res = {
+            "paragraph_counts": p_counts,
+            "body_total": body_total,
+            "total_words": total_words,
+            "ratios": ratios,
+            "word_count_status": wc_status,
+            "contractions": contractions_found,
+            "exclamations": exclamation_count,
+            "format_issues": format_issues
+        }
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+
+    print("==================== 作文质量与 7 项硬指标预检报告 ====================")
+    print(f"• 正文分段词数: {p_detail if p_detail else '未分段'}")
+    print(f"• 正文总词数: {body_total} 词 (全篇含称呼落款: {total_words} 词)")
+    print(f"• 词数安全判定: {wc_desc}")
+    print(f"• 视觉比例诊断: {ratio_str} (基准参考: 2-6-2 黄金视觉律)")
+
+    if contractions_found:
+        items_str = ", ".join(f"L{ln}: '{w}'" for ln, w in contractions_found)
+        print(f"• 口语缩写扫描: [FAIL] 发现 {len(contractions_found)} 处口语缩写 ({items_str})，公文严禁缩写！")
+    else:
+        print("• 口语缩写扫描: [PASS] 0 处口语缩写（严格通过）")
+
+    if exclamation_count > 0:
+        print(f"• 感叹号扫描: [FAIL] 发现 {exclamation_count} 处感叹号，考研公文严禁感叹号！")
+    else:
+        print("• 感叹号扫描: [PASS] 0 处感叹号（严格通过）")
+
+    if format_issues:
+        print(f"• 格式与标点扫描: [FAIL] 发现 {len(format_issues)} 处格式瑕疵:")
+        for iss in format_issues:
+            print(f"  - {iss}")
+    else:
+        print("• 格式与标点扫描: [PASS] 称呼逗号、结尾敬语与署名规范全部合规")
+
+    print("======================================================================")
+
 def main():
     parser = argparse.ArgumentParser(description="Kaoyan Writing KB Manager")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1258,6 +1433,7 @@ def main():
     p_arch.add_argument("--content", type=str, default=None, help="Markdown content")
     p_arch.add_argument("--file", type=str, default=None, help="File containing markdown content")
     p_arch.add_argument("--metadata", type=str, default=None, help="JSON string with metadata")
+    p_arch.add_argument("--metadata-file", type=str, default=None, help="File containing JSON metadata")
 
     # session
     p_sess = subparsers.add_parser("session", help="Record session version progression")
@@ -1270,6 +1446,13 @@ def main():
     # cleanup
     p_clean = subparsers.add_parser("cleanup", help="Evaluate items for dormancy or retirement")
     p_clean.add_argument("--apply", action="store_true", help="Apply cleanup recommendations")
+
+    # check-essay
+    p_check = subparsers.add_parser("check-essay", help="Quick check essay word count, 2-6-2 ratio and 7 hard indicators")
+    p_check.add_argument("--text", type=str, default=None, help="Essay text content")
+    p_check.add_argument("--file", type=str, default=None, help="File containing essay text")
+    p_check.add_argument("--genre", type=str, default="letter", help="Essay genre (default: letter)")
+    p_check.add_argument("--json", action="store_true", help="Output as JSON")
 
     # verify
     subparsers.add_parser("verify", help="Verify syntax and integrity of JSONL databases")
@@ -1291,6 +1474,8 @@ def main():
         cmd_session(args)
     elif args.command == "cleanup":
         cmd_cleanup(args)
+    elif args.command == "check-essay":
+        cmd_check_essay(args)
     elif args.command == "verify":
         cmd_verify(args)
 
