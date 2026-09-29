@@ -84,7 +84,7 @@ class TestKBManager(unittest.TestCase):
         # 1. Brief mode
         res_brief = self.run_cmd(["anchor", "--genre", "notice"])
         self.assertEqual(res_brief.returncode, 0, f"anchor failed: {res_brief.stderr}")
-        self.assertNotIn("The Postgraduate Association", res_brief.stdout)
+        self.assertNotIn("Fifty volunteers will be recruited", res_brief.stdout)
         self.assertIn("官方范文正文默认不展示", res_brief.stdout)
         self.assertIn("语域与语气深度剖析", res_brief.stdout)
         self.assertIn("句法与考纲词汇标尺", res_brief.stdout)
@@ -92,8 +92,8 @@ class TestKBManager(unittest.TestCase):
         # 2. Full mode
         res_full = self.run_cmd(["anchor", "--genre", "notice", "--full"])
         self.assertEqual(res_full.returncode, 0, f"anchor --full failed: {res_full.stderr}")
-        self.assertIn("官方高分范文 (Official Model):", res_full.stdout)
-        self.assertIn("The Postgraduate Association", res_full.stdout)
+        self.assertIn("官方高分范文 (Official Model", res_full.stdout)
+        self.assertIn("Fifty volunteers will be recruited", res_full.stdout)
 
     def test_04_query_invitation_relevance_and_no_library(self):
         """C1 & E2: Test 'query --genre invitation' excludes library morphemes and templates are non-empty."""
@@ -293,5 +293,59 @@ class TestKBManager(unittest.TestCase):
         self.assertEqual(data_flawed["exclamations"], 1)
         self.assertGreater(len(data_flawed["format_issues"]), 0)
 
+    def test_11_english_ii_complete_16_years_coverage(self):
+        """Verify that all 16 years (2010-2025) of English II past papers exist and can be queried."""
+        for yr in range(2010, 2026):
+            res = self.run_cmd(["anchor", "--year", str(yr)])
+            self.assertEqual(res.returncode, 0, f"Querying anchor for year {yr} failed: {res.stderr}")
+            self.assertIn("English II", res.stdout, f"Year {yr} output missing English II anchor")
+            self.assertIn(str(yr), res.stdout, f"Year {yr} output missing year tag")
+
+    def test_12_english_i_complete_21_years_coverage(self):
+        """Verify that all 21 years (2005-2025) of English I past papers exist and can be queried."""
+        for yr in range(2005, 2026):
+            res = self.run_cmd(["anchor", "--year", str(yr)])
+            self.assertEqual(res.returncode, 0, f"Querying anchor for English I year {yr} failed: {res.stderr}")
+            self.assertIn("English I", res.stdout, f"Year {yr} output missing English I anchor")
+            self.assertIn(str(yr), res.stdout, f"Year {yr} output missing year tag")
+
+    def test_13_english_i_dual_model_support(self):
+        """Verify that English I anchors support dual models and CLI options --model-version 1, 2, all."""
+        # 1. Brief mode contains dual model notification
+        res_brief = self.run_cmd(["anchor", "--year", "2021"])
+        self.assertEqual(res_brief.returncode, 0)
+        self.assertIn("双范文支持（含【版本一 · 高级范文】与【版本二 · 满分习作】）", res_brief.stdout)
+
+        # 2. Full mode with version 1
+        res_v1 = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "1"])
+        self.assertEqual(res_v1.returncode, 0)
+        self.assertIn("Official Model · 版本一 高级范文", res_v1.stdout)
+        self.assertNotIn("Official Model · 版本二 满分习作", res_v1.stdout)
+
+        # 3. Full mode with version 2
+        res_v2 = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "2"])
+        self.assertEqual(res_v2.returncode, 0)
+        self.assertIn("Official Model · 版本二 满分习作", res_v2.stdout)
+        self.assertNotIn("Official Model · 版本一 高级范文", res_v2.stdout)
+
+        # 4. Full mode with version all (default)
+        res_all = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "all"])
+        self.assertEqual(res_all.returncode, 0)
+        self.assertIn("【版本一 · 高级范文】", res_all.stdout)
+        self.assertIn("【版本二 · 满分习作】", res_all.stdout)
+
+        # 5. Full JSON mode contains structured dual models
+        res_json = self.run_cmd(["anchor", "--year", "2021", "--full", "--json"])
+        self.assertEqual(res_json.returncode, 0)
+        data = json.loads(res_json.stdout)
+        self.assertIsInstance(data, list)
+        eng1_anchor = next(a for a in data if a.get("exam_type") == "English I")
+        self.assertIn("model_advanced", eng1_anchor)
+        self.assertIn("model_perfect", eng1_anchor)
+        self.assertIn("official_models", eng1_anchor)
+        self.assertEqual(len(eng1_anchor["official_models"]), 2)
+
 if __name__ == "__main__":
     unittest.main()
+
+

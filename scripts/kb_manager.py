@@ -242,16 +242,38 @@ def cmd_anchor(args):
 
     genre_target = normalize_genre(args.genre) if args.genre else None
     year_target = str(args.year).strip() if args.year else None
+    exam_target = str(args.exam_type).strip().lower() if getattr(args, "exam_type", None) else None
+
+    if exam_target:
+        if exam_target in ("1", "英一", "eng1", "english1", "english 1", "english i"):
+            exam_target_norm = "english i"
+        elif exam_target in ("2", "英二", "eng2", "english2", "english 2", "english ii"):
+            exam_target_norm = "english ii"
+        else:
+            exam_target_norm = exam_target
+    else:
+        exam_target_norm = None
+
+    if not genre_target and not year_target and not exam_target_norm:
+        print("[ERROR] 请至少指定 --genre、--year 或 --exam-type 参数之一。", file=sys.stderr)
+        return
 
     matches = []
     for item in anchors:
         item_genre = str(item.get("genre", "")).lower()
         item_year = str(item.get("year", ""))
+        item_exam = str(item.get("exam_type", "")).lower()
         if genre_target:
             if genre_target != item_genre and genre_target not in item_genre:
                 continue
         if year_target:
             if year_target != item_year:
+                continue
+        if exam_target_norm:
+            if exam_target_norm in ("english i", "english ii"):
+                if exam_target_norm != item_exam:
+                    continue
+            elif exam_target_norm not in item_exam:
                 continue
         matches.append(item)
 
@@ -272,6 +294,12 @@ def cmd_anchor(args):
             m_copy = dict(m)
             if not args.full:
                 m_copy["official_model"] = "[OMITTED: run with --full to view full model text]"
+                if "model_advanced" in m_copy:
+                    m_copy["model_advanced"] = "[OMITTED]"
+                if "model_perfect" in m_copy:
+                    m_copy["model_perfect"] = "[OMITTED]"
+                if "official_models" in m_copy:
+                    m_copy["official_models"] = "[OMITTED]"
             out_matches.append(m_copy)
         print(json.dumps(out_matches if len(out_matches) > 1 else out_matches[0], ensure_ascii=False, indent=2))
         return
@@ -304,11 +332,20 @@ def cmd_anchor(args):
             print(f"• 推荐抽取的高价值核心骨架:")
             for e in extracts:
                 print(f"  - {e}")
+        has_dual = bool(anchor.get("model_perfect") or (anchor.get("official_models") and len(anchor.get("official_models")) > 1))
+        if has_dual:
+            print("• 范文架构: 双范文支持（含【版本一 · 高级范文】与【版本二 · 满分习作】）")
         print(f"• 真题出处文件: {source_file}")
 
         # P0-2: Leak protection: Only display official model if --full is requested
         if args.full:
-            print(f"\n• 官方高分范文 (Official Model):\n{model}")
+            m_ver = getattr(args, "model_version", "all")
+            if m_ver == "1" and anchor.get("model_advanced"):
+                print(f"\n• 官方高分范文 (Official Model · 版本一 高级范文):\n{anchor.get('model_advanced')}")
+            elif m_ver == "2" and anchor.get("model_perfect"):
+                print(f"\n• 官方高分范文 (Official Model · 版本二 满分习作):\n{anchor.get('model_perfect')}")
+            else:
+                print(f"\n• 官方高分范文 (Official Model):\n{model}")
         else:
             print(f"\n• [提示] 官方范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
 
@@ -1412,9 +1449,11 @@ def main():
 
     # anchor
     p_anchor = subparsers.add_parser("anchor", help="Query official past paper model essay anchor")
-    p_anchor.add_argument("--genre", type=str, required=True, help="Genre (e.g. advice, reply_letter, invitation)")
+    p_anchor.add_argument("--genre", type=str, default=None, help="Genre (e.g. advice, reply_letter, invitation)")
     p_anchor.add_argument("--year", type=str, default=None, help="Exam year (optional)")
+    p_anchor.add_argument("--exam-type", type=str, default=None, help="Filter by exam type ('English I', 'English II', '英一', '英二')")
     p_anchor.add_argument("--full", action="store_true", help="Include full official model essay text (internal use only)")
+    p_anchor.add_argument("--model-version", choices=["all", "1", "2"], default="all", help="Select model version for exams supporting dual models (1: 高级范文, 2: 满分习作, all: 完整展示)")
     p_anchor.add_argument("--json", action="store_true", help="Output as JSON")
 
     # batch-update
