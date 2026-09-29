@@ -24,7 +24,8 @@ version: 1.0.0
 
 本 Skill 适配 OpenMinis for Android (基于 PRoot + Alpine Linux 沙箱，挂载在 `/var/minis/skills/free-kaoyan-practical-writing/`)：
 - **短命进程模型**：Agent 每次 `shell_execute` 底层均为全新独立进程（`/bin/sh -c "<cmd>"`），无交互式持续终端，命令统一采用绝对路径；
-- **Alpine Python 3 环境**：沙箱内执行依赖 Alpine `python3`（若环境缺少可执行 `apk add --no-cache python3` 补齐依赖）。
+- **Alpine Python 3 环境**：沙箱内执行依赖 Alpine `python3`（若环境缺少可执行 `apk add --no-cache python3` 补齐依赖）；
+- **用户外脑持久化安全解耦**：用户外脑与 Skill 安装目录彻底解耦，优先自动探测挂载在 `/var/minis/mounts/Documents/考研英语/写作外脑/`（或降级至沙箱持久工作区 `/var/minis/workspace/考研英语/写作外脑/`）。Skill 更新重装绝不丢失个人学习进度与满意范文！支持 `init --reset` 一键格式化或出厂纯净重置。
 
 ---
 
@@ -34,9 +35,10 @@ version: 1.0.0
 > **🚨 严禁在常规对话首轮主动使用 `file_read` 读取 `references/` 下的文件！**
 > `references/` 仅作为特殊罕见场景（如偶见的会议纪要/备忘录特殊格式争议）的离线备查资产，日常会话直接遵循本文件决策推进即可。
 
+- **系统状态查验与外脑初始化**：`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py status`（查验外脑存储路径与当前 39 篇真题标尺就绪情况；首次使用或需出厂重置可运行 `... init --reset`）；
 - **阶段 0 写作前知识库检索**：`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py query --genre <文类> --limit 5`；
 - **阶段 1 与阶段 2 作文硬指标预检**：`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py check-essay --text "<作文全文>"`（一键获取 P1/P2/P3 词数、2-6-2 比例、口语缩写与感叹号扫描，**严禁自行在 /tmp 编写临时脚本统计词数**）；
-- **阶段 2 高级版必读官方真题范文标尺**：`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py anchor --genre <当前文类>`（已支持 `suggestion` ➔ `advice` 别名自动归一化）；
+- **阶段 2 高级版必读官方真题范文标尺**：`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py anchor --genre <当前文类> [--exam-type "英一"/"英二"] [--year <年份>]`（全量覆盖 39 篇历年真题，英一 2005-2025 全量支持高级范文与满分习作双标尺）；
 - **阶段 3 知识库外脑落地**：通过 `file_write` 将标准 JSON 写入 `/tmp/batch.json`，调用 `python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py batch-update --file /tmp/batch.json --task-id <TASK_ID>`。
 
 ---

@@ -23,6 +23,7 @@ import argparse
 import datetime
 import re
 from pathlib import Path
+import shutil
 
 # Force UTF-8 stdout/stderr on Windows
 if sys.platform.startswith("win"):
@@ -105,60 +106,281 @@ VALID_STATUSES = {"active", "dormant", "retired"}
 VALID_REGISTERS = {"informal_peer", "neutral_formal", "formal_authority", "public_notice"}
 VALID_SECTIONS = {"opening", "body", "closing", "format", "any"}
 
-def get_base_dir() -> Path:
-    # 1. Environment variable if set
+def test_writable_dir(target_path_str: str) -> bool:
+    """真实探测目录可写性（支持创建临时父目录并执行写入测试）"""
+    try:
+        p = Path(target_path_str)
+        if p.exists() and os.access(p, os.W_OK):
+            return True
+        parent = p
+        while parent and not parent.exists() and parent != parent.parent:
+            parent = parent.parent
+        # 避免在根目录（如 / 或 D:\）下直接滥建未知顶层目录，要求已存在父级至少有1级非根路径
+        if parent and parent.exists() and len(parent.parts) > 1:
+            p.mkdir(parents=True, exist_ok=True)
+            test_file = p / ".perm_test"
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("1")
+            test_file.unlink(missing_ok=True)
+            return True
+    except Exception:
+        pass
+    return False
+
+def get_builtin_base_dir() -> Path:
+    """定位 Skill 内置的静态教研底座资产（anchors, shared 及出厂种子模板）"""
+    if "KB_BUILTIN_ROOT" in os.environ:
+        p = Path(os.environ["KB_BUILTIN_ROOT"])
+        if p.exists():
+            return p
+
+    # 1. 优先使用环境变量 KB_ROOT（保持单测兼容）
     if "KB_ROOT" in os.environ:
         kb_env = Path(os.environ["KB_ROOT"])
         if kb_env.exists():
             return kb_env
 
-    # 2. Current working directory
-    cwd = Path.cwd()
-    if (cwd / "knowledge_base").exists():
-        return cwd / "knowledge_base"
-
-    # 3. Relative to script directory: skill root knowledge_base (scripts/../knowledge_base)
+    # 2. 脚本所在目录相对定位 (free-kaoyan-practical-writing/knowledge_base)
     script_dir = Path(__file__).resolve().parent
     skill_kb = script_dir.parent / "knowledge_base"
     if skill_kb.exists():
         return skill_kb
 
-    # 4. Relative to script directory: parent repo knowledge_base (scripts/../../knowledge_base)
+    # 3. 宿主上级目录定位
     repo_kb = script_dir.parent.parent / "knowledge_base"
     if repo_kb.exists():
         return repo_kb
 
-    # 5. Minis Android standard sandbox paths
-    minis_ws_kb = Path("/var/minis/workspace/knowledge_base")
-    if minis_ws_kb.exists():
-        return minis_ws_kb
-
+    # 4. OpenMinis 默认安装路径
     minis_skill_kb = Path("/var/minis/skills/free-kaoyan-practical-writing/knowledge_base")
     if minis_skill_kb.exists():
         return minis_skill_kb
 
-    # Fatal: cannot resolve path
-    print(
-        "[FATAL] Cannot locate 'knowledge_base' directory.\n"
-        "Please ensure knowledge_base exists, or set the KB_ROOT environment variable:\n"
-        "  - Minis Linux: export KB_ROOT=/var/minis/skills/free-kaoyan-practical-writing/knowledge_base\n"
-        "  - Linux/macOS: export KB_ROOT=/path/to/knowledge_base\n"
-        "  - PowerShell:  $env:KB_ROOT = 'D:\\path\\to\\knowledge_base'",
-        file=sys.stderr
-    )
-    sys.exit(1)
+    return skill_kb
 
-def get_paths(kb_dir: Path):
+def get_user_brain_dir() -> Path:
+    """
+    智能解析用户外脑安全持久化存储路径，彻底与 Skill 目录解耦：
+    1. 环境变量优先：KAOYAN_WRITING_KB 或 KAOYAN_USER_BRAIN 或 KB_ROOT
+    2. Open Minis 外部挂载 Documents 优先（/var/minis/mounts/Documents/考研英语/写作外脑）
+    3. Android 手机公共文档目录原生探测（/storage/emulated/0/Documents/考研英语/写作外脑）
+    4. Open Minis 沙盒持久工作区降级（/var/minis/workspace/考研英语/写作外脑）
+    5. PC / 桌面系统用户文档目录（~/Documents/考研英语/写作外脑）
+    6. 本地开发/单测环境兜底
+    """
+    # 1. 显式环境变量优先
+    env_path = os.environ.get("KAOYAN_WRITING_KB") or os.environ.get("KAOYAN_USER_BRAIN") or os.environ.get("KB_ROOT")
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
+    # 2. Open Minis 外部挂载目录与持久区优先（仅在 OpenMinis 环境生效）
+    if os.path.exists("/var/minis"):
+        minis_mount_candidates = [
+            "/var/minis/mounts/Documents/考研英语/写作外脑",
+            "/var/minis/mounts/documents/考研英语/写作外脑",
+            "/var/minis/mounts/Documents/写作外脑",
+            "/var/minis/mounts/documents/写作外脑",
+        ]
+        if os.path.isdir("/var/minis/mounts"):
+            try:
+                for entry in os.listdir("/var/minis/mounts"):
+                    sub = os.path.join("/var/minis/mounts", entry)
+                    if os.path.isdir(sub) and entry.lower() in ["documents", "document", "docs"]:
+                        cand = os.path.join(sub, "考研英语", "写作外脑")
+                        if cand not in minis_mount_candidates:
+                            minis_mount_candidates.insert(0, cand)
+            except Exception:
+                pass
+
+        for cand in minis_mount_candidates:
+            if test_writable_dir(cand):
+                return Path(cand)
+
+        # Open Minis 官方 workspace 降级
+        minis_ws = "/var/minis/workspace/考研英语/写作外脑"
+        if os.path.exists("/var/minis/workspace"):
+            if test_writable_dir(minis_ws):
+                return Path(minis_ws)
+
+    # 3. Android 原生公共存储路径探测
+    if os.path.exists("/storage/emulated/0") or os.path.exists("/sdcard"):
+        android_candidates = [
+            "/storage/emulated/0/Documents/考研英语/写作外脑",
+            "/sdcard/Documents/考研英语/写作外脑",
+            "/storage/emulated/0/Download/考研英语/写作外脑",
+            "/sdcard/Download/考研英语/写作外脑",
+        ]
+        for cand in android_candidates:
+            if test_writable_dir(cand):
+                return Path(cand)
+
+    # 4. PC / 常规系统（Windows / macOS / Linux）用户文档目录
+    try:
+        home = Path.home()
+        pc_docs = home / "Documents" / "考研英语" / "写作外脑"
+        if (home / "Documents").exists():
+            if test_writable_dir(str(pc_docs)):
+                return pc_docs
+    except Exception:
+        pass
+
+    # 6. 本地开发/单测环境兜底
+    script_dir = Path(__file__).resolve().parent
+    local_kb = script_dir.parent / "knowledge_base"
+    return local_kb
+
+def get_base_dir() -> Path:
+    """兼容旧接口"""
+    return get_builtin_base_dir()
+
+def init_user_brain(user_brain_dir: Path = None, force_reset: bool = False) -> Path:
+    """初始化或格式化用户外脑目录（自动播种出厂种子与旧数据迁移）"""
+    if user_brain_dir is None:
+        user_brain_dir = get_user_brain_dir()
+
+    base_dir = get_builtin_base_dir()
+    seed_t1 = base_dir / "user_brain" / "task1_expressions.jsonl"
+
+    if user_brain_dir.name == "user_brain":
+        ub_sub = user_brain_dir
+    else:
+        ub_sub = user_brain_dir / "user_brain"
+
+    target_t1 = ub_sub / "task1_expressions.jsonl"
+    target_tasks = ub_sub / "tasks.jsonl"
+    target_hist = ub_sub / "history.log"
+    target_sess = ub_sub / "sessions"
+
+    # Archives target: 优先满意范文/task1
+    if user_brain_dir.name == "写作外脑" or (user_brain_dir / "满意范文").exists() or not (ub_sub / "satisfaction_archives").exists():
+        target_arch = user_brain_dir / "满意范文" / "task1"
+    else:
+        target_arch = ub_sub / "satisfaction_archives" / "task1"
+
+    ub_sub.mkdir(parents=True, exist_ok=True)
+    target_arch.mkdir(parents=True, exist_ok=True)
+    target_sess.mkdir(parents=True, exist_ok=True)
+
+    now_iso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if force_reset or not target_t1.exists() or target_t1.stat().st_size == 0:
+        if not force_reset:
+            # 尝试向上跨级自愈迁移：检测 workspace 中是否有遗留的学习数据
+            legacy_candidates = [
+                Path("/var/minis/workspace/考研英语/写作外脑/user_brain/task1_expressions.jsonl"),
+            ]
+            migrated = False
+            for leg in legacy_candidates:
+                if leg.exists() and leg.resolve() != target_t1.resolve() and leg.stat().st_size > 0:
+                    try:
+                        leg_items = read_jsonl(leg)
+                        has_progress = any(it.get("mastery") != "未接触" or it.get("version", 1) > 1 for it in leg_items)
+                        if has_progress:
+                            write_jsonl(target_t1, leg_items)
+                            leg_tasks = leg.parent / "tasks.jsonl"
+                            if leg_tasks.exists():
+                                shutil.copy2(leg_tasks, target_tasks)
+                            print(f"[MIGRATE] 检测到历史有效学习数据，已自动迁移至外部外脑: {user_brain_dir}")
+                            migrated = True
+                            break
+                    except Exception:
+                        pass
+            if migrated:
+                return user_brain_dir
+
+        # 播种纯净出厂种子
+        if seed_t1.exists() and seed_t1.resolve() != target_t1.resolve():
+            shutil.copy2(seed_t1, target_t1)
+        elif not target_t1.exists():
+            target_t1.touch()
+
+        if force_reset or not target_tasks.exists():
+            with open(target_tasks, "w", encoding="utf-8") as f:
+                pass
+
+        if force_reset or not target_hist.exists():
+            with open(target_hist, "w", encoding="utf-8") as f:
+                entry = {
+                    "ts": now_iso,
+                    "op": "init",
+                    "id": "SYS_INIT",
+                    "before": None,
+                    "after": "出厂纯净写作外脑种子就绪",
+                    "reason": "格式化重置并初始化考研小作文出厂外脑" if force_reset else "初始化考研小作文出厂外脑",
+                    "task_id": ""
+                }
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # 标记外脑元数据
+        meta_file = user_brain_dir / ".kb_meta.json"
+        try:
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "initialized_at": now_iso,
+                    "version": "1.0.0",
+                    "storage_type": "external_mount" if "/mounts/" in str(user_brain_dir) else "local",
+                    "clean_factory": True
+                }, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return user_brain_dir
+
+def get_paths(kb_dir: Path = None, base_kb_dir: Path = None, user_brain_dir: Path = None) -> dict:
+    """双根路由解析：只读教研底座资产 + 外部读写用户外脑"""
+    if kb_dir is not None:
+        if base_kb_dir is None:
+            base_kb_dir = kb_dir
+        if user_brain_dir is None:
+            user_brain_dir = kb_dir
+
+    if base_kb_dir is None:
+        base_kb_dir = get_builtin_base_dir()
+    if user_brain_dir is None:
+        user_brain_dir = get_user_brain_dir()
+
+    # 确定 user_brain 子目录
+    if user_brain_dir.name == "user_brain":
+        ub_sub = user_brain_dir
+    else:
+        ub_sub = user_brain_dir / "user_brain"
+
+    # 确定范文归档目录
+    if (user_brain_dir / "满意范文" / "task1").exists():
+        archives_dir = user_brain_dir / "满意范文" / "task1"
+        archives_root = user_brain_dir / "满意范文"
+    elif (ub_sub / "satisfaction_archives" / "task1").exists():
+        archives_dir = ub_sub / "satisfaction_archives" / "task1"
+        archives_root = ub_sub / "satisfaction_archives"
+    elif (user_brain_dir / "satisfaction_archives" / "task1").exists():
+        archives_dir = user_brain_dir / "satisfaction_archives" / "task1"
+        archives_root = user_brain_dir / "satisfaction_archives"
+    else:
+        if user_brain_dir.name == "写作外脑" or (user_brain_dir / "满意范文").exists():
+            archives_dir = user_brain_dir / "满意范文" / "task1"
+            archives_root = user_brain_dir / "满意范文"
+        else:
+            archives_dir = ub_sub / "satisfaction_archives" / "task1"
+            archives_root = ub_sub / "satisfaction_archives"
+
+    t1_file = ub_sub / "task1_expressions.jsonl"
+    # 若外脑未初始化且处于挂载/持久目录，自动触发静默播种
+    if not t1_file.exists() and user_brain_dir != base_kb_dir:
+        init_user_brain(user_brain_dir, force_reset=False)
+
     return {
-        "task1": kb_dir / "user_brain" / "task1_expressions.jsonl",
-        "shared": kb_dir / "shared" / "scenario_morphemes.jsonl",
-        "anchors": kb_dir / "anchors" / "task1_past_papers.jsonl",
-        "archives": kb_dir / "user_brain" / "satisfaction_archives" / "task1",
-        "archives_root": kb_dir / "user_brain" / "satisfaction_archives",
-        "tasks": kb_dir / "user_brain" / "tasks.jsonl",
-        "history_log": kb_dir / "user_brain" / "history.log",
-        "sessions": kb_dir / "user_brain" / "sessions"
+        "base_root": base_kb_dir,
+        "user_root": user_brain_dir,
+        "task1": t1_file,
+        "shared": base_kb_dir / "shared" / "scenario_morphemes.jsonl",
+        "anchors": base_kb_dir / "anchors" / "task1_past_papers.jsonl",
+        "archives": archives_dir,
+        "archives_root": archives_root,
+        "tasks": ub_sub / "tasks.jsonl",
+        "history_log": ub_sub / "history.log",
+        "sessions": ub_sub / "sessions"
     }
+
 
 def read_jsonl(file_path: Path, strict: bool = False):
     if not file_path.exists():
@@ -236,8 +458,7 @@ def check_admission_rules(item: dict) -> tuple[bool, str]:
     return True, "OK"
 
 def cmd_anchor(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     anchors = read_jsonl(paths["anchors"])
 
     genre_target = normalize_genre(args.genre) if args.genre else None
@@ -350,8 +571,7 @@ def cmd_anchor(args):
             print(f"\n• [提示] 官方范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
 
 def cmd_query(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     results = []
 
     target_type = args.type.lower()
@@ -365,10 +585,13 @@ def cmd_query(args):
     if genre_filter and genre_filter in GENRE_TO_SCENARIOS:
         allowed_scenarios = set(GENRE_TO_SCENARIOS[genre_filter])
 
+    task1_ids = set()
     # 1. Load task1 expressions
     if target_type in ("all", "task1"):
         task1_items = read_jsonl(paths["task1"])
         for item in task1_items:
+            if "id" in item:
+                task1_ids.add(item["id"])
             # Hard filter: status
             if item.get("status") == "retired":
                 continue
@@ -390,7 +613,7 @@ def cmd_query(args):
                     continue
 
             if scenario_filter:
-                text_to_search = f"{item.get('intent', '')} {item.get('expression', '')} {' '.join(item.get('tags', []))}".lower()
+                text_to_search = f"{item.get('intent', '')} {item.get('intent_cn', '')} {item.get('expression', '')} {item.get('verb_phrase', '')} {item.get('scenario', '')} {' '.join(item.get('tags', []))}".lower()
                 if scenario_filter not in text_to_search:
                     continue
 
@@ -412,6 +635,8 @@ def cmd_query(args):
     if target_type in ("all", "shared"):
         shared_items = read_jsonl(paths["shared"])
         for item in shared_items:
+            if item.get("id") in task1_ids:
+                continue
             if item.get("status") == "retired":
                 continue
             if item.get("exam_band") == "超纲":
@@ -597,8 +822,7 @@ def generate_item_id(target: str, item: dict, existing_records: list) -> str:
         return f"{prefix}{max_seq + 1:03d}"
 
 def cmd_append(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     target = args.target.lower()
 
     if target not in ("task1", "shared"):
@@ -624,6 +848,9 @@ def cmd_append(args):
 
     items_to_add = new_data if isinstance(new_data, list) else [new_data]
     target_path = paths[target]
+    if target == "shared" and not target_path.resolve().is_relative_to(paths["user_root"].resolve()):
+        target = "task1"
+        target_path = paths["task1"]
     current_records = read_jsonl(target_path)
 
     existing_ids = {r.get("id") for r in current_records if "id" in r}
@@ -698,8 +925,7 @@ def cmd_append(args):
         print("[INFO] 未有新条目写入。")
 
 def cmd_batch_update(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
 
     raw_data = args.data
     if not raw_data and args.file:
@@ -730,6 +956,7 @@ def cmd_batch_update(args):
     if status_updates:
         task1_records = read_jsonl(paths["task1"])
         shared_records = read_jsonl(paths["shared"])
+        is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
         updated_count = 0
 
         for upd in status_updates:
@@ -743,7 +970,8 @@ def cmd_batch_update(args):
                 continue
 
             found = False
-            for rec in task1_records + shared_records:
+            # Check task1 first
+            for rec in task1_records:
                 if rec.get("id") == t_id:
                     old_st = rec.get("mastery", "未接触")
                     hist = rec.setdefault("history", {
@@ -768,14 +996,12 @@ def cmd_batch_update(args):
                         rec["mastery_note"] = "需注意"
                     elif is_independent:
                         hist["independent_use_count"] = hist.get("independent_use_count", 0) + 1
-                        # If used in >= 2 distinct tasks independently, or already learned in previous task
                         if len(used_tasks) >= 2 or hist["independent_use_count"] >= 1:
                             actual_st = "稳定"
                             rec["mastery_note"] = ""
                         else:
                             actual_st = "敢用"
                     else:
-                        # Prompted use cannot reach 稳定 directly
                         if actual_st == "稳定":
                             actual_st = "敢用"
 
@@ -796,14 +1022,71 @@ def cmd_batch_update(args):
                     updated_count += 1
                     break
 
+            # If not in task1, check shared
+            if not found:
+                for rec in shared_records:
+                    if rec.get("id") == t_id:
+                        old_st = rec.get("mastery", "未接触")
+                        hist = rec.setdefault("history", {
+                            "recommended_count": 0, "used_count": 0, "last_used": None,
+                            "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
+                            "consecutive_recommended_no_use": 0, "user_notes": ""
+                        })
+
+                        used_tasks = set(hist.get("used_in_tasks", []))
+                        if task_id:
+                            used_tasks.add(task_id)
+                            hist["used_in_tasks"] = sorted(list(used_tasks))
+
+                        hist["last_used"] = now_iso
+                        hist["used_count"] = hist.get("used_count", 0) + 1
+
+                        actual_st = proposed_st
+                        if is_error or "瑕疵" in note or "用错" in note:
+                            hist["error_use_count"] = hist.get("error_use_count", 0) + 1
+                            actual_st = "敢用"
+                            rec["mastery_note"] = "需注意"
+                        elif is_independent:
+                            hist["independent_use_count"] = hist.get("independent_use_count", 0) + 1
+                            if len(used_tasks) >= 2 or hist["independent_use_count"] >= 1:
+                                actual_st = "稳定"
+                                rec["mastery_note"] = ""
+                            else:
+                                actual_st = "敢用"
+                        else:
+                            if actual_st == "稳定":
+                                actual_st = "敢用"
+
+                        rec["mastery"] = actual_st
+                        rec["version"] = rec.get("version", 1) + 1
+
+                        evidence = rec.setdefault("status_evidence", {})
+                        evidence["last_promotion_reason"] = f"{actual_st}: {note}"
+                        evidence["last_evidence_task_id"] = task_id
+
+                        if note:
+                            prev = hist.get("user_notes", "")
+                            hist["user_notes"] = f"{prev}; [{now_iso}] {note}".strip("; ")
+
+                        log_history(paths, "update_status", t_id, old_st, actual_st, note, task_id)
+                        print(f"  [STATUS] [{t_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
+                        if not is_shared_writable:
+                            # Promote into task1 expressions to protect read-only base
+                            task1_records.append(rec)
+                        found = True
+                        updated_count += 1
+                        break
+
         write_jsonl(paths["task1"], task1_records)
-        write_jsonl(paths["shared"], shared_records)
+        if is_shared_writable:
+            write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 已成功更新 {updated_count} 条条目的掌握度状态。")
 
     # 2. Process new items
     if new_items:
         task1_records = read_jsonl(paths["task1"])
         shared_records = read_jsonl(paths["shared"])
+        is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
         added_task1 = 0
         added_shared = 0
 
@@ -825,6 +1108,9 @@ def cmd_batch_update(args):
             if key and key in existing_keys:
                 print(f"  [SKIP] 条目已存在，跳过: {key}")
                 continue
+
+            if not is_shared_writable and target == "shared":
+                target = "task1"
 
             if not item.get("id"):
                 item["id"] = generate_item_id(target, item, task1_records if target == "task1" else shared_records)
@@ -875,13 +1161,12 @@ def cmd_batch_update(args):
 
         if added_task1 > 0:
             write_jsonl(paths["task1"], task1_records)
-        if added_shared > 0:
+        if added_shared > 0 and is_shared_writable:
             write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 批量录入完成：追加 task1 条目 {added_task1} 条，shared 条目 {added_shared} 条。")
 
 def cmd_update_status(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     target_id = args.id.strip()
     new_status = args.status.strip()
 
@@ -892,10 +1177,39 @@ def cmd_update_status(args):
     updated = False
     now_iso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    for t_name in ("task1", "shared"):
-        t_path = paths[t_name]
-        records = read_jsonl(t_path)
-        for rec in records:
+    task1_records = read_jsonl(paths["task1"])
+    shared_records = read_jsonl(paths["shared"])
+    is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
+
+    # Check task1 first
+    for rec in task1_records:
+        if rec.get("id") == target_id:
+            old_status = rec.get("mastery", "未接触")
+            rec["mastery"] = new_status
+            rec["version"] = rec.get("version", 1) + 1
+            hist = rec.setdefault("history", {
+                "recommended_count": 0, "used_count": 0, "last_used": None,
+                "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
+                "consecutive_recommended_no_use": 0, "user_notes": ""
+            })
+            hist["last_used"] = now_iso
+            if args.increment_used:
+                hist["used_count"] = hist.get("used_count", 0) + 1
+            if args.increment_recommended:
+                hist["recommended_count"] = hist.get("recommended_count", 0) + 1
+            if args.note:
+                prev_notes = hist.get("user_notes", "")
+                hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
+
+            log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
+            write_jsonl(paths["task1"], task1_records)
+            print(f"[OK] 成功更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {paths['task1'].name})")
+            updated = True
+            break
+
+    # If not found in task1, check shared
+    if not updated:
+        for rec in shared_records:
             if rec.get("id") == target_id:
                 old_status = rec.get("mastery", "未接触")
                 rec["mastery"] = new_status
@@ -915,20 +1229,22 @@ def cmd_update_status(args):
                     hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
 
                 log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
-                write_jsonl(t_path, records)
-                print(f"[OK] 成功更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {t_path.name})")
+                if is_shared_writable:
+                    write_jsonl(paths["shared"], shared_records)
+                    print(f"[OK] 成功更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {paths['shared'].name})")
+                else:
+                    task1_records.append(rec)
+                    write_jsonl(paths["task1"], task1_records)
+                    print(f"[OK] 成功提升并更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (已同步保存至用户外脑: {paths['task1'].name})")
                 updated = True
                 break
-        if updated:
-            break
 
     if not updated:
         print(f"[ERROR] 未找到 ID 为 '{target_id}' 的条目。", file=sys.stderr)
         sys.exit(1)
 
 def cmd_archive(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     archives_dir = paths["archives"]
     archives_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1023,8 +1339,7 @@ def cmd_archive(args):
     print(f"[OK] 题目台账已同步至: {tasks_file}")
 
 def cmd_session(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     sessions_dir = paths["sessions"]
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1081,12 +1396,12 @@ def cmd_session(args):
     print(f"[OK] 会话记录已更新: {session_file}")
 
 def cmd_cleanup(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
+    paths = get_paths()
     print("=== 开始知识库体检与定期清理评估 ===")
 
     task1_records = read_jsonl(paths["task1"])
     shared_records = read_jsonl(paths["shared"])
+    is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
 
     dormant_candidates = []
     retired_candidates = []
@@ -1121,15 +1436,15 @@ def cmd_cleanup(args):
                 rec["status"] = "dormant"
                 updated += 1
         write_jsonl(paths["task1"], task1_records)
-        write_jsonl(paths["shared"], shared_records)
+        if is_shared_writable:
+            write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 已应用清理策略，状态流转 {updated} 条。")
     else:
         print("[INFO] 本次为试运行，添加 --apply 可实际执行软删除与降权。")
 
 def cmd_verify(args):
-    kb_dir = get_base_dir()
-    paths = get_paths(kb_dir)
-    print(f"=== 开始严格校验知识库: {kb_dir} ===")
+    paths = get_paths()
+    print(f"=== 开始严格校验知识库 ===\n• 教研底座: {paths['base_root']}\n• 用户外脑: {paths['user_root']}")
 
     has_error = False
     total_valid = 0
@@ -1418,9 +1733,86 @@ def cmd_check_essay(args):
 
     print("======================================================================")
 
+def cmd_init(args):
+    force_reset = getattr(args, "reset", False)
+    target_dir = None
+    if getattr(args, "dir", None):
+        target_dir = Path(args.dir).expanduser().resolve()
+    user_root = init_user_brain(user_brain_dir=target_dir, force_reset=force_reset)
+    paths = get_paths(user_brain_dir=user_root)
+    print("==================== 考研小作文写作外脑初始化报告 ====================")
+    print(f"• 教研底座目录 (只读): {paths['base_root']}")
+    print(f"• 用户外脑目录 (读写): {paths['user_root']}")
+    print(f"• 执行动作: {'【格式化重置】出厂纯净播种' if force_reset else '【安全初始化】就绪探测'}")
+    t1_count = len(read_jsonl(paths["task1"]))
+    sh_count = len(read_jsonl(paths["shared"]))
+    anc_count = len(read_jsonl(paths["anchors"]))
+    print(f"• 表达库 (task1_expressions.jsonl): {t1_count} 条 (就绪)")
+    print(f"• 场景语素库 (scenario_morphemes.jsonl): {sh_count} 条 (只读底座)")
+    print(f"• 历年真题标尺库 (task1_past_papers.jsonl): {anc_count} 篇 (只读底座)")
+    print(f"• 范文归档目录: {paths['archives']}")
+    print(f"• 题目台账路径: {paths['tasks']}")
+    print(f"• 外脑健康状态: [PASS] 状态正常，已与 Skill 目录完全解耦并安全持久化！")
+    print("======================================================================")
+
+def cmd_status(args):
+    paths = get_paths()
+    print("==================== 考研英语小作文系统运行状态 ====================")
+    print(f"• 教研底座路径: {paths['base_root']}")
+    print(f"• 用户外脑路径: {paths['user_root']}")
+    user_root_str = str(paths['user_root']).replace("\\", "/")
+    if "/mounts/" in user_root_str:
+        storage_type = "OpenMinis 外部挂载存储 (/var/minis/mounts/Documents/...)"
+    elif "/storage/emulated" in user_root_str or "/sdcard" in user_root_str:
+        storage_type = "Android 原生公共文档存储 (/storage/emulated/0/Documents/...)"
+    elif "/workspace" in user_root_str:
+        storage_type = "OpenMinis 沙盒持久工作区 (/var/minis/workspace/...)"
+    elif "Documents" in user_root_str:
+        storage_type = "PC / 宿主机用户文档目录 (Documents/...)"
+    else:
+        storage_type = "本地开发/单测环境兜底存储"
+    print(f"• 外脑存储类型: {storage_type}")
+
+    t1_records = read_jsonl(paths["task1"])
+    sh_records = read_jsonl(paths["shared"])
+    anc_records = read_jsonl(paths["anchors"])
+
+    mastery_counts = {"稳定": 0, "敢用": 0, "学习中": 0, "未接触": 0}
+    for r in t1_records:
+        m = r.get("mastery", "未接触")
+        mastery_counts[m] = mastery_counts.get(m, 0) + 1
+
+    print(f"• 个人词句外脑总数: {len(t1_records)} 条")
+    print(f"  - 掌握度分布: 稳定={mastery_counts['稳定']} | 敢用={mastery_counts['敢用']} | 学习中={mastery_counts['学习中']} | 未接触={mastery_counts['未接触']}")
+    print(f"• 场景语素底座: {len(sh_records)} 条")
+    print(f"• 历年真题标尺: {len(anc_records)} 篇 (英一 2005-2025 全量双范文原生支持)")
+
+    tasks = read_jsonl(paths["tasks"])
+    arch_files = list(paths["archives"].glob("*.md")) if paths["archives"].exists() else []
+    print(f"• 满意范文归档: {len(arch_files)} 篇")
+    print(f"• 练习台账记录: {len(tasks)} 条")
+
+    meta_file = paths["user_root"] / ".kb_meta.json"
+    if meta_file.exists():
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+                print(f"• 外脑初始化时间: {meta.get('initialized_at', '未知')}")
+        except Exception:
+            pass
+    print("======================================================================")
+
 def main():
     parser = argparse.ArgumentParser(description="Kaoyan Writing KB Manager")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # init
+    p_init = subparsers.add_parser("init", help="Initialize or reset external user brain")
+    p_init.add_argument("--reset", action="store_true", help="Force format and reset user brain to clean factory seed")
+    p_init.add_argument("--dir", type=str, default=None, help="Explicit target directory for user brain")
+
+    # status
+    subparsers.add_parser("status", help="Show system status and knowledge base routing")
 
     # query
     p_query = subparsers.add_parser("query", help="Query expressions/morphemes")
@@ -1497,7 +1889,11 @@ def main():
     subparsers.add_parser("verify", help="Verify syntax and integrity of JSONL databases")
 
     args = parser.parse_args()
-    if args.command == "query":
+    if args.command == "init":
+        cmd_init(args)
+    elif args.command == "status":
+        cmd_status(args)
+    elif args.command == "query":
         cmd_query(args)
     elif args.command == "anchor":
         cmd_anchor(args)

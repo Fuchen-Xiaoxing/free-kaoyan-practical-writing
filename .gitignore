@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Temporary files
+*.tmp
+tmp/
+.perm_test
+
+# Local user runtime archives (prevent accidental commits if developed locally)
+knowledge_base/user_brain/sessions/
+knowledge_base/user_brain/satisfaction_archives/task1/*.md
+!knowledge_base/user_brain/satisfaction_archives/task1/.gitkeep

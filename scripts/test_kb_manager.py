@@ -19,6 +19,7 @@ import sys
 import json
 import subprocess
 import shutil
+import tempfile
 from pathlib import Path
 
 # Force UTF-8 on Windows
@@ -344,6 +345,93 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("model_perfect", eng1_anchor)
         self.assertIn("official_models", eng1_anchor)
         self.assertEqual(len(eng1_anchor["official_models"]), 2)
+
+    def test_14_storage_detection_and_reset(self):
+        """Verify that KAOYAN_USER_BRAIN decodes to external directory and init --reset provisions clean factory seed."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            res = self.run_cmd(["init", "--reset"], env=env)
+            self.assertEqual(res.returncode, 0, f"init --reset failed: {res.stderr}\n{res.stdout}")
+            self.assertIn("出厂纯净播种", res.stdout)
+
+            ub_t1 = Path(temp_dir) / "user_brain" / "task1_expressions.jsonl"
+            self.assertTrue(ub_t1.exists(), "task1_expressions.jsonl was not provisioned")
+
+            # Read and verify records
+            with open(ub_t1, "r", encoding="utf-8") as f:
+                lines = [json.loads(l) for l in f if l.strip()]
+            self.assertEqual(len(lines), 55)
+            self.assertTrue(all(item.get("mastery") == "未接触" for item in lines))
+
+            # Check other factory files
+            tasks_file = Path(temp_dir) / "user_brain" / "tasks.jsonl"
+            self.assertTrue(tasks_file.exists())
+            self.assertEqual(tasks_file.stat().st_size, 0)
+
+            hist_file = Path(temp_dir) / "user_brain" / "history.log"
+            self.assertTrue(hist_file.exists())
+            with open(hist_file, "r", encoding="utf-8") as f:
+                h_lines = [json.loads(l) for l in f if l.strip()]
+            self.assertEqual(len(h_lines), 1)
+            self.assertEqual(h_lines[0].get("id"), "SYS_INIT")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_15_write_isolation_and_promotion(self):
+        """Verify that updating a shared morpheme in decoupled mode does NOT alter the base shared file, and promotes to user task1."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_iso_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            self.run_cmd(["init", "--reset"], env=env)
+
+            # Base shared file
+            base_shared = Path(__file__).resolve().parent.parent / "knowledge_base" / "shared" / "scenario_morphemes.jsonl"
+            mtime_before = base_shared.stat().st_mtime
+
+            # Update status of a morpheme from shared (e.g. M_LIB_001)
+            res = self.run_cmd(["update-status", "--id", "M_LIB_001", "--status", "敢用", "--note", "首次学习"], env=env)
+            self.assertEqual(res.returncode, 0, f"update-status failed: {res.stderr}\n{res.stdout}")
+            self.assertIn("已同步保存至用户外脑", res.stdout)
+
+            # Verify base shared file was not touched
+            mtime_after = base_shared.stat().st_mtime
+            self.assertEqual(mtime_before, mtime_after, "Base shared file was mutated!")
+
+            # Verify it was added to user's task1_expressions.jsonl
+            ub_t1 = Path(temp_dir) / "user_brain" / "task1_expressions.jsonl"
+            with open(ub_t1, "r", encoding="utf-8") as f:
+                user_items = [json.loads(l) for l in f if l.strip()]
+            promoted = next((it for it in user_items if it.get("id") == "M_LIB_001"), None)
+            self.assertIsNotNone(promoted, "M_LIB_001 was not promoted into user task1")
+            self.assertEqual(promoted.get("mastery"), "敢用")
+
+            # Query and ensure user's promoted version is returned without duplicates
+            res_query = self.run_cmd(["query", "--scenario", "prolong", "--json"], env=env)
+            self.assertEqual(res_query.returncode, 0)
+            q_data = json.loads(res_query.stdout)
+            m_lib = [it for it in q_data if it.get("id") == "M_LIB_001"]
+            self.assertEqual(len(m_lib), 1, "Duplicate M_LIB_001 returned in query")
+            self.assertEqual(m_lib[0].get("mastery"), "敢用")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_16_status_command(self):
+        """Verify 'status' command outputs complete architecture diagnosis."""
+        res = self.run_cmd(["status"])
+        self.assertEqual(res.returncode, 0, f"status failed: {res.stderr}\n{res.stdout}")
+        self.assertIn("考研英语小作文系统运行状态", res.stdout)
+        self.assertIn("教研底座路径:", res.stdout)
+        self.assertIn("用户外脑路径:", res.stdout)
+        self.assertIn("外脑存储类型:", res.stdout)
+        self.assertIn("个人词句外脑总数:", res.stdout)
+        self.assertIn("历年真题标尺: 39 篇", res.stdout)
 
 if __name__ == "__main__":
     unittest.main()
