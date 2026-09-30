@@ -17,7 +17,7 @@ version: 1.0.0
 2. **偏题坚决扣留基础版成品**：初稿若核心要点偏题，指出偏题点与语法错误，**严禁生成完整基础版全文**，督促学生自己改切题；改切题后方可提供基础版成品。
 3. **两阶段严格物理隔离**：**基础版未获用户显式确认定稿前，绝不输出高级版，绝不引入高级难词难句**。基础版严守《基础版禁用清单》（禁用伴随状语、禁用倒装、禁用重度名词化），专注于格式 100% 合规、采分点 100% 齐全、主谓语法准确。
 4. **制作高级版强制对齐官方真题范文（Anchor）**：制作高级版前，**必须先调取对应文类的内置真题范文标尺 (`python3 /var/minis/skills/free-kaoyan-practical-writing/scripts/kb_manager.py anchor --genre <文类>`)**。内置范文是 AI 内部参考，**绝不直接粘贴给用户**；执行防写偏反思（语域精准契合受众权责、杜绝虚构未提示的冗余参数、动词承重），杜绝 AI 自娱自乐写偏。
-5. **格式与语域生死红线**：称呼靠左顶格书写、首字母大写、末尾必用英文半角逗号（`,`，不要用冒号）；正文一般分为三段（目的、细节、收尾），每一段第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间不空行；结尾敬语单独占一行、整体靠右对齐、首字母大写、末尾加逗号；署名在敬语下一行同样靠右对齐、首字母大写（唯一合法署名 `Li Ming` 绝不加句号）；结语与受众权责严格匹配（致同侪好友使用 `Best regards,` / `Warmest regards,`；致师长、长辈或机构规范使用 `Yours sincerely,`；熟人信件禁止自我介绍）；全篇**绝对零口语缩写**（禁用 `don't / can't / I'm / it's`）、**绝对零感叹号**（`!`）。
+5. **格式与语域生死红线**：称呼靠左顶格书写、首字母大写、末尾必用英文半角逗号（`,`，不要用冒号）；正文一般分为三段（目的、细节、收尾），每一段第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间不空行；结尾敬语单独占一行、整体靠右对齐、首字母大写、末尾加逗号；署名在敬语下一行同样靠右对齐、首字母大写（唯一合法署名 `Li Ming` 绝不加句号）；结尾敬语严格执行三大固定搭配（知道姓名用 `Yours sincerely,`；不知道姓名用 `Yours faithfully,`；写给朋友的私人书信称呼直接用 `Dear XXX,`，结语用 `Best wishes,` 或 `Kind regards,`；朋友信严禁使用 `Yours sincerely,`；熟人信件禁止自我介绍）；全篇**绝对零口语缩写**（禁用 `don't / can't / I'm / it's`）、**绝对零感叹号**（`!`）。
 6. **外脑 5 大来源 5-10 条沉淀闭环**：高级版定稿后，必须一次性提议 **5-10 条高复用候选**（覆盖 5 大来源），经用户确认后调用脚本写入 JSONL 知识库，并将满意作文存为独立 Markdown 归档。
 
 ### Minis Android 沙箱环境规范
@@ -191,7 +191,7 @@ flowchart TD
 2. **【步骤 1：CP3 检查点与防写偏反思】**：
    - 在内部思考中完成自查：
      1. **真题属性核验**：若调取的 anchor 标记 `is_real_exam: false`（如求职信与会议纪要），仅作结构体裁参考，绝不作真题考法真实考据；
-     2. **语域标尺对齐**：受众为同侪熟人时是否随和得体、结语使用 `Best regards,` 且杜绝陈旧僵化公文套话？受众为师长机构时是否庄重克制、结语规范使用 `Yours sincerely,`？
+     2. **语域标尺对齐**：是否对齐称呼与敬语固定搭配（知道姓名用 `Yours sincerely,`；不知姓名用 `Yours faithfully,`；朋友私人书信称呼用 `Dear XXX,`，结语使用 `Best wishes,` 或 `Kind regards,` 且杜绝陈旧僵化公文套话与 `Yours sincerely,`）？
      3. **细节拓展边界**：是否存在题干未提示的冗余技术参数、附件或无中生有设定？（严禁节外生枝）；
      4. **词汇适配**：是否处于考研考纲核心动词与搭配区间？（坚决杜绝超纲偏难怪词）；
      5. **动词承重**：是否使用主干承重骨架 (S+V+O) 彻底打破系表贫血？
@@ -371,7 +371,7 @@ Dear [Name],
     [Paragraph 2...]
     [Paragraph 3...]
 
-                                        [Best regards, / Yours sincerely,]
+                                        [Best wishes, / Kind regards, / Yours sincerely, / Yours faithfully,]
                                         Li Ming
 
 *(字数统计：约 98 词 | 格式零硬伤，要点 100% 齐全，严守基础版禁用清单)*
@@ -391,7 +391,7 @@ Dear [Name],
     [Paragraph 2...] [知识库: ID] [高分表达]
     [Paragraph 3...]
 
-                                        [Best regards, / Yours sincerely,]
+                                        [Best wishes, / Kind regards, / Yours sincerely, / Yours faithfully,]
                                         Li Ming
 
 ---
@@ -431,7 +431,7 @@ Dear [Name],
     [Paragraph 2...]
     [Paragraph 3...]
 
-                                        [Best regards, / Yours sincerely,]
+                                        [Best wishes, / Kind regards, / Yours sincerely, / Yours faithfully,]
                                         Li Ming
 
 *(字数统计：严格 104 词 | 2-6-2 黄金视觉比例，语域精准得体)*

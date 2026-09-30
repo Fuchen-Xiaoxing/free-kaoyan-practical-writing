@@ -52,18 +52,22 @@ campus Wi-Fi infrastructure.
 #### 视觉生死线：
 1. **称呼（顶格写）**：
    - **靠左顶格书写，首字母大写，末尾必须加逗号（不要用冒号 `:`）**；
-   - 致特定已知收件人：`Dear Professor Wang,` / `Dear Mr. Smith,` / `Dear Curator,`（致馆长：*严禁加定冠词 the，首字母大写*）；
-   - 致未知/机构负责人：`Dear Sir or Madam,`（*严禁写斜杠 `Dear Sir/Madam`，严禁写复数 `Dear Sirs`*）；
-   - 致同侪熟人：`Dear Friends,` / `Dear Classmates,` / `Dear John,`（使用同辈常用亲切称呼）。
+   - **称呼与结尾敬语三大固定对应法则（黄金契约）**：
+     - **① 知道姓名** ➔ `Dear Mr. Smith,` / `Dear Professor Wang,` ➔ 结尾敬语固定搭配 `Yours sincerely,`；
+     - **② 不知道姓名** ➔ `Dear Sir or Madam,` ➔ 结尾敬语固定搭配 `Yours faithfully,`（*严禁写斜杠 `Dear Sir/Madam`，严禁写复数 `Dear Sirs`*）；
+     - **③ 朋友私人书信（如邀请信、感谢信、致同学好友）** ➔ 称呼可以直接用 `Dear XXX,`（如 `Dear John,` / `Dear Li Hua,` / `Dear Friends,`），结尾敬语可以用 `Best wishes,` 或 `Kind regards,`（亦可用 `Best regards,`）。
 2. **正文（首行缩进）**：
    - **一般分为三段（目的、细节、收尾）**；
    - **每一段的第一行都要向内缩进 4 个英文字母（大约相当于两个汉字的位置）**；
    - **段落与段落之间【坚决不空行】**（缩进式排版铁律；节省宝贵卷面行数）。
 3. **结尾敬语（靠右写）**：
    - **单独占一行，整体靠右对齐（或者与下方的署名右对齐），首字母大写，末尾加逗号（`,`）**；
-   - **致同侪好友/同辈同学**：**必须使用 `Best regards,` / `Warmest regards,` / `Yours,`**；
-     - 🚨 **生死红线**：对同学同侪坚决严禁使用 `Yours sincerely,`（过于官僚，语域不匹配扣分）；
-   - **致上位者/师长/官方/商务（Professor/Mr./Curator/Sir or Madam）**：使用 `Yours sincerely,` / `Yours faithfully,`。
+   - **固定搭配对应表**：
+     | 书信情境 | 称呼示范（顶格写） | 结尾敬语（靠右写） | 语域红线 |
+     | :--- | :--- | :--- | :--- |
+     | **知道姓名** (师长/外宾/已知负责人) | `Dear Mr. Smith,` / `Dear Professor Wang,` | `Yours sincerely,` | 严禁加 the（如 `Dear Curator,`）；末尾必加英文逗号 `,` |
+     | **不知道姓名** (未知具体机构负责人) | `Dear Sir or Madam,` | `Yours faithfully,` | 严禁斜杠 `Dear Sir/Madam`，严禁复数 `Dear Sirs` |
+     | **朋友私人书信** (邀请信/感谢信/同侪) | `Dear XXX,` (如 `Dear John,` / `Dear Friends,`) | `Best wishes,` 或 `Kind regards,` (亦可用 `Best regards,`) | 🚨 **生死红线**：朋友私人信坚决严禁使用 `Yours sincerely,`（过于官僚扣得体度分） |
 4. **署名（靠右写）**：
    - **在结尾敬语的下一行，同样靠右对齐，首字母大写**；
    - **考纲指定唯一合法署名：`Li Ming`**（不得写本人真实姓名，不得自创 Peter 等名字）；
@@ -199,7 +203,7 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 ### 考场交卷前 60 秒自查清单：
 - [ ] **称呼格式**：靠左顶格书写，首字母大写，末尾必须加逗号 `,`（不要用冒号 `:`）
 - [ ] **段落缩进**：一般分为三段（目的、细节、收尾），每一段的第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间坚决不空行
-- [ ] **结尾敬语**：单独占一行，整体靠右对齐（或与署名右对齐），首字母大写，末尾加逗号 `,`（同侪信必须用 Best regards,）
+- [ ] **结尾敬语**：单独占一行，整体靠右对齐（或与署名右对齐），首字母大写，末尾加逗号 `,`（知道姓名用 Yours sincerely,；不知姓名用 Yours faithfully,；朋友私人信必须用 Best wishes, 或 Kind regards,）
 - [ ] **署名格式**：在结尾敬语下一行同样靠右对齐，首字母大写落款 Li Ming，末尾绝无句号 `.`
 - [ ] **语言纯洁**：全文 0 处口语缩写（0 处 don't / can't / I'm）
 - [ ] **标点纯洁**：全文 0 处感叹号 `!`

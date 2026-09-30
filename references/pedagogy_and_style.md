@@ -27,9 +27,10 @@
 官方真题范文（`knowledge_base/anchors/task1_past_papers.jsonl`）在整个体系中是 **AI 的内部参考，绝不直接展示给用户**。其核心职能是作为“评分锚”和“内容锚”：
 
 1. **语域与语气第一锚点 (Register Anchor)**：
-   - 在动笔升华前，私教必须严格比对内置范文的行文口吻：
-     - **同侪关系（如致同学好友）**：一律使用亲切、自然、现代的书信语域，结语必须使用 `Best regards,` / `Warmest regards,`，**坚决杜绝陈旧僵化的公文套话**（严禁滥用生硬繁冗的客套句，严禁使用 `Yours sincerely,`）；
-     - **上位者关系（如致教授/组委会/馆长）**：谦逊克制，结语规范使用 `Yours sincerely,`。
+   - 在动笔升华前，私教必须严格比对内置范文的行文口吻与结尾敬语对应契约：
+     - **朋友私人书信（如邀请信、感谢信、致同学好友）**：称呼用 `Dear XXX,`，结语使用 `Best wishes,` 或 `Kind regards,`（亦可用 `Best regards,`），**坚决杜绝陈旧僵化的公文套话**（严禁滥用生硬繁冗的客套句，🚨 严禁使用 `Yours sincerely,`）；
+     - **知道姓名（如致教授/学者/已知负责人）**：`Dear Mr. Smith,` / `Dear Professor Wang,` ➔ 结语规范使用 `Yours sincerely,`；
+     - **不知道姓名（未知机构负责人）**：`Dear Sir or Madam,` ➔ 结语规范使用 `Yours faithfully,`。
 2. **细节拓展边界标尺 (Detail Boundary Anchor)**：
    - 考研小作文只写 100 词左右，展开必须克制紧凑；
    - 以官方范文的 5W1H 展开深度为准绳，**严禁无中生有编造题干未提及的附件、议程、未提示的技术参数或多余设定**。

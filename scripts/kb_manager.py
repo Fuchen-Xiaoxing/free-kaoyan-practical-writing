@@ -1618,7 +1618,7 @@ def cmd_check_essay(args):
 
     # Signoff detector (from the bottom)
     signoff_patterns = [
-        r'^(best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
+        r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
         r'^(li\s+ming|zhang\s+wei|wang\s+hua)[,\.]?$',
         r'^(the\s+student\s+union|postgraduate\s+association)[,\.]?$'
     ]
@@ -1670,7 +1670,7 @@ def cmd_check_essay(args):
             format_issues.append(f"称呼末尾缺少英文逗号（'{salutation}'）")
 
     for s_line in signoff:
-        if re.match(r'^(best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours)', s_line, re.IGNORECASE):
+        if re.match(r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully)', s_line, re.IGNORECASE):
             if not s_line.endswith(","):
                 format_issues.append(f"结语敬语缺少英文逗号（'{s_line}'）")
         if re.match(r'^(li\s+ming)', s_line, re.IGNORECASE):
