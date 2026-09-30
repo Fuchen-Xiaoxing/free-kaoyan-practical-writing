@@ -45,26 +45,27 @@ exam intervals. Furthermore, the administration is kindly expected to upgrade th
 campus Wi-Fi infrastructure.
     I sincerely hope that these humble proposals will be taken into favorable consideration.
 
-Yours sincerely,
-Li Ming
+                                                    Yours sincerely,
+                                                    Li Ming
 ```
 
 #### 视觉生死线：
-1. **称呼（Salutation）**：
-   - 顶格书写，**末尾必须是英文逗号（`,`），坚决禁止使用中文冒号（`:`）**；
+1. **称呼（顶格写）**：
+   - **靠左顶格书写，首字母大写，末尾必须加逗号（不要用冒号 `:`）**；
    - 致特定已知收件人：`Dear Professor Wang,` / `Dear Mr. Smith,` / `Dear Curator,`（致馆长：*严禁加定冠词 the，首字母大写*）；
    - 致未知/机构负责人：`Dear Sir or Madam,`（*严禁写斜杠 `Dear Sir/Madam`，严禁写复数 `Dear Sirs`*）；
    - 致同侪熟人：`Dear Friends,` / `Dear Classmates,` / `Dear John,`（使用同辈常用亲切称呼）。
-2. **正文段落（Body Paragraphs）**：
-   - **首行缩进 4 个英文字符（约 1 个制表位）**；
-   - **段落与段落之间【坚决不空行】**（缩进式排版铁律；若齐头式才空行，但考研标准统一使用缩进式不空行，节省宝贵卷面行数）。
-3. **结尾敬语（Complimentary Close）**：
-   - 顶格书写，末尾必须加**英文逗号（`,`）**；
+2. **正文（首行缩进）**：
+   - **一般分为三段（目的、细节、收尾）**；
+   - **每一段的第一行都要向内缩进 4 个英文字母（大约相当于两个汉字的位置）**；
+   - **段落与段落之间【坚决不空行】**（缩进式排版铁律；节省宝贵卷面行数）。
+3. **结尾敬语（靠右写）**：
+   - **单独占一行，整体靠右对齐（或者与下方的署名右对齐），首字母大写，末尾加逗号（`,`）**；
    - **致同侪好友/同辈同学**：**必须使用 `Best regards,` / `Warmest regards,` / `Yours,`**；
      - 🚨 **生死红线**：对同学同侪坚决严禁使用 `Yours sincerely,`（过于官僚，语域不匹配扣分）；
    - **致上位者/师长/官方/商务（Professor/Mr./Curator/Sir or Madam）**：使用 `Yours sincerely,` / `Yours faithfully,`。
-4. **署名（Signature）**：
-   - 紧随敬语下方独占一行；
+4. **署名（靠右写）**：
+   - **在结尾敬语的下一行，同样靠右对齐，首字母大写**；
    - **考纲指定唯一合法署名：`Li Ming`**（不得写本人真实姓名，不得自创 Peter 等名字）；
    - **署名末尾【坚决禁止加句号】**（如写成 `Li Ming.` 属于严重标点硬伤扣分）。
 
@@ -188,7 +189,7 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 
 ### 7 项量化硬指标：
 1. **正文词数**：90~110 词（纪要 ≤120 词）；
-2. **格式硬伤数**：= 0（称呼英文逗号、首行缩进 4 字符、段间不空行、落款逗号、署名无句号）；
+2. **格式硬伤数**：= 0（称呼靠左顶格首字母大写逗号、正文三段首行缩进 4 字符段间不空行、结尾敬语与署名靠右对齐、落款逗号、署名无句号）；
 3. **口语缩写数**：= 0（0 个 don't/can't/I'm）；
 4. **感叹号数**：= 0（全篇 0 个 !）；
 5. **超纲词数**：= 0（紧扣考纲核心动词短语）；
@@ -196,10 +197,10 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 7. **无中生有数**：= 0（零虚构未提示的技术参数/附件/日程）。
 
 ### 考场交卷前 60 秒自查清单：
-- [ ] **称呼标点**：最后是英文逗号 `,`，绝无中文冒号 `:`
-- [ ] **段落缩进**：各段首行严格缩进 4 字符，段间坚决未空行
-- [ ] **结尾敬语**：Yours sincerely, / Best regards, 后紧跟逗号 `,`（同侪信必须用 Best regards,）
-- [ ] **署名格式**：落款 Li Ming，末尾绝无多加句号 `.`
+- [ ] **称呼格式**：靠左顶格书写，首字母大写，末尾必须加逗号 `,`（不要用冒号 `:`）
+- [ ] **段落缩进**：一般分为三段（目的、细节、收尾），每一段的第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间坚决不空行
+- [ ] **结尾敬语**：单独占一行，整体靠右对齐（或与署名右对齐），首字母大写，末尾加逗号 `,`（同侪信必须用 Best regards,）
+- [ ] **署名格式**：在结尾敬语下一行同样靠右对齐，首字母大写落款 Li Ming，末尾绝无句号 `.`
 - [ ] **语言纯洁**：全文 0 处口语缩写（0 处 don't / can't / I'm）
 - [ ] **标点纯洁**：全文 0 处感叹号 `!`
 - [ ] **词数达标**：正文稳定在 90~110 词（约 10~12 行）
