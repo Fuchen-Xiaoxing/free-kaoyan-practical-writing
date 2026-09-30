@@ -23,9 +23,9 @@ $$\mathbf{【主干立骨架 (S + V + O)】} \quad\boldsymbol{+}\quad \mathbf{�
 
 ---
 
-## 二、三大高频病灶与破局心法速查
+## 二、三大高频病灶与重构解法速查
 
-| 典型病灶形态 | 典型病句反例 | 病理解析 | 方法论破局心法 |
+| 典型病灶形态 | 典型病句反例 | 病理解析 | 方法论重构解法 |
 | :--- | :--- | :--- | :--- |
 | **1. 静态系表贫血症** | *The meeting is very important for students to communicate.* | 动词毫无推进力，全靠初级形容词 *important / good* 凑字数，缺乏物理动作。 | **主干立骨架 (S+V+O)**：用具象行为动词（`focuses on mutual communication`）替代静态 `is important`。 |
 | **2. 悬空宽泛名词** | *We can do many things to solve this big problem.* | 名词极度笼统单薄（*things, problems, ways*），概念悬空无物理细节。 | **模块化修饰积木**：选用精准范畴词 ➔ 前置定性形容词 ➔ 后置介词短语细节定格。 |
@@ -113,32 +113,32 @@ $$\mathbf{[核心主干骨架 (S+V+O)]} + \mathbf{[积木 A·前置定性]} + \m
 
 ---
 
-## 四、增量式积木组装流水线 (Incremental Assembly Pipeline)
+## 四、造句重构三步法流水线 (Sentence Crafting Pipeline)
 
-面对学生的任何病句，带写教学必须严格执行四步递进流水线，像搭积木一样还原成句：
+面对学生的任何病句，带写教学严格执行 3 步递进解构，清晰实用，杜绝冗长堆砌与空洞口号：
 
 ```
-Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3: 挂功能闭环 (积木C)  ➔  Step 4: 基础合规句落地
+① 病灶透视  ➔  ② 主干立骨架 (S+V+O)  ➔  ③ 模块化修饰积木挂载
 ```
 
-1. **Step 1（核心主干 S+V+O）**：剔除所有病态修饰，提炼真实英文主干片段；
-2. **Step 2（嵌入定格修饰）**：加入前置定性形容词或后置介词短语，让语义扎实落地；
-3. **Step 3（挂载功能从句闭环）**：挂载定从或目的状语，交代行为成效与交际意图；
-4. **Step 4（合规基础句成型）**：展示符合大纲规范、严守禁用清单的完整基础句。
+1. **① 病灶透视**：直击本质，指出系表软骨、动作悬空或中式流水账病灶；
+2. **② 主干立骨架 (S+V+O)**：剔除病态修饰，提炼行为主体 (S) + 具象承重动词 (V) + 核心客体 (O)；
+3. **③ 模块化修饰积木**：按需挂载前置定性格调（积木 A）、后置定格介词短语（积木 B）与功能闭环从句/状语（积木 C），自然落地为合规基础句。
+*(结构精炼为 3 步核心解构，彻底去除冗余拼装与空洞口号，教学干练聚焦)*
 
 ---
 
-## 五、两阶段造句重构边界契约（严守物理隔离）
+## 五、两阶段造句重构边界契约（严守物理隔离与非主动引入原则）
 
 为确保基础版与高级版严格物理隔离，造句示范必须严格分阶：
 
-| 教学阶段 | 允许使用的结构武器 | 禁用结构清单 | 教学定位 |
+| 教学阶段 | 允许使用的结构武器 | 禁用结构与顺应契约 | 教学定位 |
 | :--- | :--- | :--- | :--- |
-| **阶段 1：基础版批改教学** | • 主谓宾承重骨架 (S+V+O)<br>• 基础定语从句 (`which will + verb`)<br>• 基础目的状语 (`in order to / so as to`)<br>• 基础并列复合句 (`not only... but also...`) | [禁止] **严禁伴随状语 (`thereby doing...`)**<br>[禁止] **严禁虚拟倒装 (`Had it not been for...`)**<br>[禁止] **严禁冷僻生造学术词** | **保分底线**：消除语病与硬伤，确保要点 100% 齐全，大纲词汇通畅落地。 |
+| **阶段 1：基础版批改教学** | • 主谓宾承重骨架 (S+V+O)<br>• 基础定语从句 (`which will + verb`)<br>• 基础目的状语 (`in order to / so as to`)<br>• 基础并列复合句 (`not only... but also...`) | [非主动引入] **私教示范改句严禁主动引入伴随状语 (`thereby doing...`)、虚拟倒装 (`Had it not been for...`) 等高级结构**；<br>[顺应契约] **若学生初稿主动使用了分词伴随状语或倒装，私教顺着学生意图在基础版予以保留并规范纠偏**。 | **保分底线**：消除语病与硬伤，确保要点 100% 齐全，大纲词汇通畅落地。 |
 | **阶段 2：高级版升华教学** | • 分词伴随状语 (`thereby facilitating...`)<br>• 经典虚拟倒装 (`Had it not been for your guidance...`)<br>• 独立主格与介词短语前置<br>• 外刊级高阶动词承重与精准同位语 | [禁止] **禁用无中生有编造细节**<br>[禁止] **禁用脱离大纲的 GRE 偏难怪词** | **冲刺满分**：官方真题范文标尺对齐，展现母语级公文质感。 |
 
 > [!IMPORTANT]
-> **阶段 1 批改中严禁提前输出高级版改句**。阶段 1 逐句讲解的示范改句必须是**且仅是【合规基础句】**。高级版句式仅在阶段 2 用户定稿后统一升华输出。
+> **阶段 1 批改中私教严禁主动输出高级版改句**。示范改句必须是且仅是【合规基础句】（若初稿自主尝试高级结构则顺势批改纠偏）。高级版句式仅在阶段 2 用户定稿后统一升华输出。
 
 ---
 
@@ -147,7 +147,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 ### 场景 1：会议/活动主题与宗旨阐释
 - **学生病句**：`The topic is Chinese culture. We hope students can learn something.`
 - **改句 (合规基础版)**：`This meeting focuses on traditional Chinese culture, which will facilitate mutual communication among international peers.`
-- **[方法论重构与带写教学]**：
+- **[方法论重构教学]**：
   - **① 病灶透视**：【静态系表贫血】动词毫无推进力（*is / hope*），缺乏具象行为，名词宽泛单薄（*Chinese culture / something*）。
   - **② 主干立骨架 (S + V + O)**：
     - 主体 (S)：`This meeting`
@@ -158,10 +158,6 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
     - `[积木 A·前置定性]`：`traditional Chinese`（注入文化内涵）
     - `[积木 B·后置定格]`：`among international peers`（介词短语锁定交流群体）
     - `[积木 C·功能闭环]`：`which will facilitate...`（基础定语从句挂载预期成效）
-  - **④ 增量式积木组装**：
-    - **Step 1 (核心主干)**：`This meeting focuses on traditional Chinese culture...`
-    - **Step 2 (嵌入定格与闭环)**：`This meeting focuses on traditional Chinese culture, which will facilitate mutual communication among international peers.`
-  - **【造句心法】**：主干立骨架，动词挑大梁，积木定边界；永远用具象行为动词推动交际。
 *(阶段 2 高级版升华形态参考：Revolving around traditional Chinese culture, this session aims to cement enduring bonds of mutual understanding among international peers.)*
 
 ---
@@ -169,7 +165,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 ### 场景 2：建议信举措提出
 - **学生病句**：`The library should buy more books. It is helpful for our study.`
 - **改句 (合规基础版)**：`It would be a sound policy for the library administration to buy more academic books, which will help students prepare for final exams.`
-- **[方法论重构与带写教学]**：
+- **[方法论重构教学]**：
   - **① 病灶透视**：【口吻生硬与系表空心】使用生硬命令词 `should`，次句全靠 `is helpful` 凑字，缺乏公文建议语域与具体场景。
   - **② 主干立骨架 (S + V + O)**：
     - 主体 (S)：`the library administration`
@@ -180,10 +176,6 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
     - `[积木 A·委婉句式与定性]`：`It would be a sound policy for sb to do...`（公文委婉提议框架）
     - `[积木 B·后置定格]`：`for final exams`（介词短语锁定备考时机）
     - `[积木 C·功能闭环]`：`which will help students prepare...`（基础定从闭环成效）
-  - **④ 增量式积木组装**：
-    - **Step 1 (核心主干)**：`It would be a sound policy for the library administration to buy more academic books...`
-    - **Step 2 (嵌入定格与闭环)**：`It would be a sound policy for the library administration to buy more academic books, which will help students prepare for final exams.`
-  - **【造句心法】**：建议信拒用生硬 should，用委婉公文框架立骨架，用定从挂载务实成效。
 *(阶段 2 高级版升华形态参考：It would be a sound policy for the administration to enrich the repository of authoritative academic reference volumes, which will notably facilitate students' in-depth research.)*
 
 ---
@@ -191,7 +183,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 ### 场景 3：邀请信嘉宾角色期待
 - **学生病句**：`We hope you come to our meeting because you know a lot of things.`
 - **改句 (合规基础版)**：`As an experienced student, you are warmly welcome to share your study methods with fellow classmates.`
-- **[方法论重构与带写教学]**：
+- **[方法论重构教学]**：
   - **① 病灶透视**：【概念悬空与口语化】`know a lot of things` 极度口语且空洞，缺乏对受邀嘉宾身份与分享内容的尊重与专业定性格调。
   - **② 主干立骨架 (S + V + O)**：
     - 主体 (S)：`You`
@@ -201,10 +193,6 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **③ 模块化修饰积木**：
     - `[积木 A·身份定性格调]`：`As an experienced student, you are warmly welcome to...`（同位修饰与得体邀请）
     - `[积木 B·后置定格]`：`with fellow classmates`（介词短语锁定受众群体）
-  - **④ 增量式积木组装**：
-    - **Step 1 (核心主干)**：`You are warmly welcome to share your study methods...`
-    - **Step 2 (嵌入身份与定格)**：`As an experienced student, you are warmly welcome to share your study methods with fellow classmates.`
-  - **【造句心法】**：邀请信先定格嘉宾专长身份，再用具象动词落地分享动作。
 *(阶段 2 高级版升华形态参考：Given your multicultural background, your presence as a guest speaker would provide fellow students with invaluable academic insights.)*
 
 ---
@@ -212,7 +200,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 ### 场景 4：投诉信瑕疵与影响陈述
 - **学生病句**：`The phone is bad. It cannot work. I feel angry.`
 - **改句 (合规基础版)**：`This newly purchased device keeps shutting down unexpectedly, which makes it impossible for me to study.`
-- **[方法论重构与带写教学]**：
+- **[方法论重构教学]**：
   - **① 病灶透视**：【碎片堆叠与情绪化】3 个初中级短句碎裂堆叠，*The phone is bad / I feel angry* 充斥主观宣泄而无客观事实依据。
   - **② 主干立骨架 (S + V + O)**：
     - 主体 (S)：`This device`
@@ -222,10 +210,6 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **③ 模块化修饰积木**：
     - `[积木 A·前置定性格调]`：`This newly purchased device`（限定消费事实）
     - `[积木 B·功能闭环]`：`which makes it impossible for me to study`（形式宾语结构闭环恶果）
-  - **④ 增量式积木组装**：
-    - **Step 1 (核心主干)**：`This newly purchased device keeps shutting down unexpectedly...`
-    - **Step 2 (嵌入功能闭环)**：`This newly purchased device keeps shutting down unexpectedly, which makes it impossible for me to study.`
-  - **【造句心法】**：投诉信先摆客观故障事实，再用因果从句克制陈述切实损失，杜绝情绪谩骂。
 *(阶段 2 高级版升华形态参考：This newly purchased gadget persistently suffers from erratic system freezes, which renders it virtually impossible for me to complete academic tasks.)*
 
 ---
@@ -233,7 +217,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 ### 场景 5：回信建议与实操技巧
 - **学生病句**：`You should practice your oral report. It is good for you.`
 - **改句 (合规基础版)**：`It is advisable for you to practice your presentation with your friends, so that you can become confident.`
-- **[方法论重构与带写教学]**：
+- **[方法论重构教学]**：
   - **① 病灶透视**：【静态系表与空泛评价】*It is good for you* 是典型的凑字句式，既无具体建议实操场景，也无心理激励。
   - **② 主干立骨架 (S + V + O)**：
     - 主体 (S)：`You`
@@ -244,8 +228,4 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
     - `[积木 A·委婉提议框架]`：`It is advisable for you to...`（得体建议句式）
     - `[积木 B·后置定格]`：`with your friends`（介词短语锁定互动对象）
     - `[积木 C·功能闭环]`：`so that you can become confident`（目的状语从句闭环心理收益）
-  - **④ 增量式积木组装**：
-    - **Step 1 (核心主干)**：`It is advisable for you to practice your presentation...`
-    - **Step 2 (嵌入定格与闭环)**：`It is advisable for you to practice your presentation with your friends, so that you can become confident.`
-  - **【造句心法】**：回信提议要落到具体实操动作，用目的状语连接心理或实效闭环。
 *(阶段 2 高级版升华形态参考：Conducting a timed rehearsal in front of supportive peers will notably bolster your verbal fluency and onstage confidence.)*
