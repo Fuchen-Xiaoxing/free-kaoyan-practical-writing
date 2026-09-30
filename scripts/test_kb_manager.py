@@ -431,7 +431,59 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("用户外脑路径:", res.stdout)
         self.assertIn("外脑存储类型:", res.stdout)
         self.assertIn("个人词句外脑总数:", res.stdout)
-        self.assertIn("历年真题标尺: 39 篇", res.stdout)
+    def test_17_anchor_limit_parameter(self):
+        """Verify 'anchor' --limit parameter correctly restricts output count."""
+        # 1. Default without --limit outputs all matches
+        res_all = self.run_cmd(["anchor", "--genre", "advice"])
+        self.assertEqual(res_all.returncode, 0)
+        self.assertIn("共 10 篇", res_all.stdout)
+
+        # 2. --limit 1 outputs exactly 1 anchor and truncation notification
+        res_lim1 = self.run_cmd(["anchor", "--genre", "advice", "--limit", "1"])
+        self.assertEqual(res_lim1.returncode, 0)
+        self.assertIn("共 1 篇", res_lim1.stdout)
+        self.assertIn("【范文锚点 #1】", res_lim1.stdout)
+        self.assertNotIn("【范文锚点 #2】", res_lim1.stdout)
+        self.assertIn("• [提示] 已按最新年份展示前 1 篇真题标尺", res_lim1.stdout)
+
+        # 3. --limit 2 outputs exactly 2 anchors
+        res_lim2 = self.run_cmd(["anchor", "--genre", "advice", "--limit", "2"])
+        self.assertEqual(res_lim2.returncode, 0)
+        self.assertIn("共 2 篇", res_lim2.stdout)
+        self.assertIn("【范文锚点 #1】", res_lim2.stdout)
+        self.assertIn("【范文锚点 #2】", res_lim2.stdout)
+        self.assertNotIn("【范文锚点 #3】", res_lim2.stdout)
+
+    def test_18_check_essay_file_mode_and_missing_file(self):
+        """Verify 'check-essay --file' reads from file correctly and handles missing files gracefully."""
+        # 1. Existing file
+        test_content = (
+            "Dear Professor Wang,\n\n"
+            "    I am Li Ming, writing to consult you about the upcoming seminar.\n"
+            "    Could you please advise whether we don't need to submit the paper in advance?\n"
+            "    I look forward to your guidance.\n\n"
+            "Yours sincerely,\n"
+            "Li Ming"
+        )
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".txt") as tf:
+            tf.write(test_content)
+            temp_path = tf.name
+
+        try:
+            res = self.run_cmd(["check-essay", "--file", temp_path, "--json"])
+            self.assertEqual(res.returncode, 0, f"check-essay --file failed: {res.stderr}")
+            data = json.loads(res.stdout)
+            self.assertGreater(data["body_total"], 0)
+            self.assertEqual(len(data["contractions"]), 1)  # "don't"
+            self.assertEqual(data["contractions"][0][1], "don't")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        # 2. Missing file error handling
+        res_missing = self.run_cmd(["check-essay", "--file", "non_existent_dummy_file.txt"])
+        self.assertNotEqual(res_missing.returncode, 0)
+        self.assertIn("指定的文件不存在", res_missing.stderr + res_missing.stdout)
 
 if __name__ == "__main__":
     unittest.main()

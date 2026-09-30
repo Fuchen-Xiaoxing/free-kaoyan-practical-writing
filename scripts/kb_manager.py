@@ -509,6 +509,19 @@ def cmd_anchor(args):
         print(f"[ANCHOR] 未检索到匹配的官方真题范文 (genre={genre_target}, year={year_target})。")
         return
 
+    # Limit truncation if explicitly specified
+    total_matched = len(matches)
+    truncated = False
+    limit_arg = getattr(args, "limit", None)
+    if limit_arg is not None and str(limit_arg).lower() != "all":
+        try:
+            lim = max(1, int(limit_arg))
+            if total_matched > lim:
+                matches = matches[:lim]
+                truncated = True
+        except ValueError:
+            pass
+
     if args.json:
         out_matches = []
         for m in matches:
@@ -526,6 +539,8 @@ def cmd_anchor(args):
         return
 
     print(f"=== 官方真题范文与语域基准标尺 (共 {len(matches)} 篇) ===")
+    if truncated:
+        print(f"• [提示] 已按最新年份展示前 {len(matches)} 篇真题标尺（共匹配到 {total_matched} 篇）。如需查阅更多可指定 --limit {total_matched} 或 --limit all。")
     for idx, anchor in enumerate(matches, 1):
         year = anchor.get("year", "N/A")
         exam = anchor.get("exam_type", "N/A")
@@ -1589,11 +1604,17 @@ def cmd_verify(args):
         sys.exit(0)
 
 def cmd_check_essay(args):
-    content = args.text
-    if not content and args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
+    content = None
+    if getattr(args, "file", None):
+        fpath = Path(args.file).expanduser().resolve()
+        if not fpath.exists():
+            print(f"[ERROR] 指定的文件不存在: {args.file}", file=sys.stderr)
+            sys.exit(1)
+        with open(fpath, "r", encoding="utf-8") as f:
             content = f.read()
-    elif not content:
+    elif getattr(args, "text", None):
+        content = args.text
+    else:
         content = sys.stdin.read()
 
     if not content or not content.strip():
@@ -1844,6 +1865,7 @@ def main():
     p_anchor.add_argument("--genre", type=str, default=None, help="Genre (e.g. advice, reply_letter, invitation)")
     p_anchor.add_argument("--year", type=str, default=None, help="Exam year (optional)")
     p_anchor.add_argument("--exam-type", type=str, default=None, help="Filter by exam type ('English I', 'English II', '英一', '英二')")
+    p_anchor.add_argument("--limit", type=str, default=None, help="Max number of anchors to return (default: 1 when querying by genre, or 'all')")
     p_anchor.add_argument("--full", action="store_true", help="Include full official model essay text (internal use only)")
     p_anchor.add_argument("--model-version", choices=["all", "1", "2"], default="all", help="Select model version for exams supporting dual models (1: 高级范文, 2: 满分习作, all: 完整展示)")
     p_anchor.add_argument("--json", action="store_true", help="Output as JSON")
