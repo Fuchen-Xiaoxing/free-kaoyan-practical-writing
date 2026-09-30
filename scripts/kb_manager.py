@@ -1679,17 +1679,17 @@ def cmd_check_essay(args):
 
     # Word count safety assessment
     wc_status = "PASS"
-    if 90 <= body_total <= 110:
-        wc_desc = f"【严格通过】正文 {body_total} 词，处于 90~110 词黄金满分安全区间"
-    elif body_total < 90:
+    if 100 <= body_total <= 120:
+        wc_desc = f"【严格通过】正文 {body_total} 词，处于 100~120 词黄金满分安全区间"
+    elif body_total < 100:
         wc_status = "WARN"
-        wc_desc = f"【偏少风险】正文 {body_total} 词（不足 90 词），建议适度丰富次段支撑细节"
-    elif body_total <= 120:
+        wc_desc = f"【偏少风险】正文 {body_total} 词（不足 100 词），建议适度丰富次段支撑细节"
+    elif body_total <= 130:
         wc_status = "WARN"
-        wc_desc = f"【偏多微险】正文 {body_total} 词（略超 110 词），建议执行减法精炼"
+        wc_desc = f"【偏多微险】正文 {body_total} 词（略超 120 词），建议执行减法精炼"
     else:
         wc_status = "FAIL"
-        wc_desc = f"【严重超标】正文 {body_total} 词（已超出 110 词安全线），务必执行减法得分律替换精简"
+        wc_desc = f"【严重超标】正文 {body_total} 词（已超出 120 词安全线），务必执行减法得分律替换精简"
 
     p_detail = " | ".join(f"P{i+1}: {c} 词" for i, c in enumerate(p_counts))
 
