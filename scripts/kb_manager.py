@@ -431,18 +431,21 @@ def normalize_key(text: str) -> str:
 def check_admission_rules(item: dict) -> tuple[bool, str]:
     cat = item.get("category", "functional_sentence")
     if cat not in VALID_CATEGORIES:
-        return False, f"Invalid category: {cat}"
+        return False, f"Invalid category: {cat}. Must be one of {sorted(list(VALID_CATEGORIES))}"
 
     # 1. Reusability: must contain slots or be template/structure
     if cat in ("functional_sentence", "sentence"):
         expr = item.get("expression", "")
         if not re.search(r"\[.*?\]", expr) and not item.get("slots"):
-            return False, "Not reusable: expression lacks slots [x] or variable placeholders."
+            return False, "Not reusable: functional_sentence/sentence expression lacks slots [x] or variable placeholders."
     elif cat in ("template", "structure"):
         pass
     elif cat in ("word", "phrase"):
         if not item.get("verb_phrase") and not item.get("term") and not item.get("pattern"):
-            return False, "Word/phrase missing head term or verb_phrase."
+            if item.get("expression"):
+                item["verb_phrase"] = item["expression"]
+            else:
+                return False, "Word/phrase missing head term, verb_phrase or expression."
 
     # 2. Source and intent required
     if not item.get("source"):
@@ -451,9 +454,12 @@ def check_admission_rules(item: dict) -> tuple[bool, str]:
         return False, "Missing required field: intent/intent_cn"
 
     # 3. Exam band check
-    band = item.get("exam_band", "大纲内")
+    band = str(item.get("exam_band", "大纲内")).strip()
+    if band in ("考纲核心", "大纲词汇", "核心词汇", "大纲", "core"):
+        band = "大纲内"
+        item["exam_band"] = "大纲内"
     if band not in ("大纲内", "超纲"):
-        return False, f"Invalid exam_band: {band}"
+        return False, f"Invalid exam_band: {band}. Must be '大纲内' or '超纲'"
 
     return True, "OK"
 
@@ -940,6 +946,63 @@ def cmd_append(args):
         print("[INFO] 未有新条目写入。")
 
 def cmd_batch_update(args):
+    if getattr(args, "example", False):
+        example_spec = {
+            "task_id": "T2011-E2-ADV",
+            "status_updates": [
+                {
+                    "id": "T1_ADV_001",
+                    "status": "敢用",
+                    "note": "本篇实战用对",
+                    "independent": True
+                }
+            ],
+            "new_items": [
+                {
+                    "target": "task1",
+                    "data": {
+                        "category": "phrase",
+                        "genre": "advice",
+                        "section": "body",
+                        "register": "neutral_formal",
+                        "intent": "提前接触、初步了解某领域（替代 learn about 的平铺表达）",
+                        "verb_phrase": "gain exposure to [field]",
+                        "expression": "gain exposure to [field]",
+                        "pattern": "it is never too early to gain exposure to [field]",
+                        "slots": {
+                            "[field]": "要提前接触的领域（专业/职场/文化等）"
+                        },
+                        "source": "2011英二建议信实战·高级版升华",
+                        "tags": ["建议信", "动词承重"],
+                        "exam_band": "大纲内",
+                        "mastery": "学习中",
+                        "mastery_note": ""
+                    }
+                },
+                {
+                    "target": "task1",
+                    "data": {
+                        "category": "functional_sentence",
+                        "genre": "advice",
+                        "section": "body",
+                        "register": "neutral_formal",
+                        "intent": "双重否定式强调：推动对方尽早采取行动并给出收益",
+                        "expression": "It is never too early to [action], which will undoubtedly help you [benefit].",
+                        "slots": {
+                            "[action]": "尽早该做的动作（动词短语）",
+                            "[benefit]": "预期益处（动词短语）"
+                        },
+                        "source": "2011英二建议信实战·高级版升华",
+                        "tags": ["建议信", "功能句"],
+                        "exam_band": "大纲内",
+                        "mastery": "学习中"
+                    }
+                }
+            ]
+        }
+        print(json.dumps(example_spec, ensure_ascii=False, indent=2))
+        return
+
     paths = get_paths()
 
     raw_data = args.data
@@ -1259,6 +1322,20 @@ def cmd_update_status(args):
         sys.exit(1)
 
 def cmd_archive(args):
+    if getattr(args, "example", False):
+        print("""# 范文归档命令使用示例：
+python3 scripts/kb_manager.py archive \\
+  --title "2011英二建议信·祝贺cousin Li Ming考入大学并给出入学前准备建议" \\
+  --genre "advice" \\
+  --year "2011" \\
+  --exam-type "英二" \\
+  --task-id "T2011-E2-ADV" \\
+  --file /tmp/archive.md \\
+  --metadata '{"absorbed_items": ["T1_ADV_005 gain exposure to", "T1_ADV_006 navigate path"]}'
+
+# 说明：若 --metadata 中省略 word_count，系统将自动基于 /tmp/archive.md 的正文计算词数。""")
+        return
+
     paths = get_paths()
     archives_dir = paths["archives"]
     archives_dir.mkdir(parents=True, exist_ok=True)
@@ -1301,6 +1378,21 @@ def cmd_archive(args):
     target_file = archives_dir / filename
 
     absorbed_items = metadata.get("absorbed_items", [])
+
+    if "word_count" not in metadata:
+        # Extract body essay text before any markdown headers or dividing rules
+        essay_chunk = re.split(r'\n(?=#{1,3}\s|---|===)', content)[0].strip()
+        raw_lines = [l.strip() for l in essay_chunk.splitlines() if l.strip()]
+        if raw_lines:
+            candidate_lines = raw_lines[1:] if re.match(r'^(dear\b|to\b|notice\b|announcement\b)', raw_lines[0], re.I) else raw_lines[:]
+            signoff_patterns = [
+                r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
+                r'^(li\s+ming|zhang\s+wei|wang\s+hua)[,\.]?$',
+                r'^(the\s+student\s+union|postgraduate\s+association)[,\.]?$'
+            ]
+            while candidate_lines and any(re.match(p, candidate_lines[-1], re.I) for p in signoff_patterns):
+                candidate_lines.pop()
+            metadata["word_count"] = sum(len(p.split()) for p in candidate_lines)
 
     doc_lines = [
         f"# 考研英语小作文满意范文归档",
@@ -1871,14 +1963,64 @@ def main():
     p_anchor.add_argument("--json", action="store_true", help="Output as JSON")
 
     # batch-update
-    p_batch = subparsers.add_parser("batch-update", help="Batch update statuses and append new entries")
+    batch_epilog = """
+JSON Payload Schema for batch-update:
+{
+  "task_id": "T2011-E2-ADV",
+  "status_updates": [
+    {"id": "T1_ADV_001", "status": "学习中|敢用|稳定", "note": "...", "independent": true}
+  ],
+  "new_items": [
+    {
+      "target": "task1",
+      "data": {
+        "category": "phrase|functional_sentence|structure|template|word",
+        "genre": "advice|...",
+        "section": "opening|body|closing",
+        "register": "neutral_formal|informal_peer",
+        "intent": "中文功能意图",
+        "verb_phrase": "核心动宾短语 (phrase 必填或由 expression 回退)",
+        "expression": "表达文本或骨架",
+        "slots": {"[slot]": "说明"},
+        "source": "出处说明",
+        "exam_band": "大纲内",
+        "mastery": "学习中|敢用|稳定"
+      }
+    }
+  ]
+}
+Run 'python3 scripts/kb_manager.py batch-update --example' to print a complete ready-to-use template.
+"""
+    p_batch = subparsers.add_parser(
+        "batch-update",
+        help="Batch update statuses and append new entries",
+        epilog=batch_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p_batch.add_argument("--data", type=str, default=None, help="JSON string for batch update")
     p_batch.add_argument("--file", type=str, default=None, help="JSON file path for batch update")
     p_batch.add_argument("--task-id", type=str, default=None, help="Current task ID")
+    p_batch.add_argument("--example", action="store_true", help="Print complete example JSON payload and exit")
 
     # archive
-    p_arch = subparsers.add_parser("archive", help="Archive 10/10 model essay as markdown")
-    p_arch.add_argument("--title", type=str, required=True, help="Essay title/prompt description")
+    arch_epilog = """
+Archive Metadata Schema (--metadata JSON string or --metadata-file):
+{
+  "word_count": 109,  # Optional: automatically computed from essay body if omitted!
+  "absorbed_items": [
+    "T1_ADV_005 gain exposure to [field]",
+    "T1_ADV_006 navigate one's career path"
+  ]
+}
+Run 'python3 scripts/kb_manager.py archive --example' to print an example command.
+"""
+    p_arch = subparsers.add_parser(
+        "archive",
+        help="Archive 10/10 model essay as markdown",
+        epilog=arch_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p_arch.add_argument("--title", type=str, default=None, help="Essay title/prompt description")
     p_arch.add_argument("--genre", type=str, default="general", help="Genre name")
     p_arch.add_argument("--year", type=str, default=None, help="Exam year")
     p_arch.add_argument("--task-id", type=str, default=None, help="Task ID")
@@ -1887,6 +2029,7 @@ def main():
     p_arch.add_argument("--file", type=str, default=None, help="File containing markdown content")
     p_arch.add_argument("--metadata", type=str, default=None, help="JSON string with metadata")
     p_arch.add_argument("--metadata-file", type=str, default=None, help="File containing JSON metadata")
+    p_arch.add_argument("--example", action="store_true", help="Print archive command usage example and exit")
 
     # session
     p_sess = subparsers.add_parser("session", help="Record session version progression")

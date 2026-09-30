@@ -485,6 +485,112 @@ class TestKBManager(unittest.TestCase):
         self.assertNotEqual(res_missing.returncode, 0)
         self.assertIn("指定的文件不存在", res_missing.stderr + res_missing.stdout)
 
+    def test_19_anchors_sanitization_no_exclamation_or_contractions(self):
+        """Verify all anchors in task1_past_papers.jsonl have zero exclamation marks and zero contractions."""
+        anc_file = KB_ROOT / "anchors" / "task1_past_papers.jsonl"
+        with open(anc_file, "r", encoding="utf-8") as f:
+            records = [json.loads(line) for line in f]
+
+        self.assertGreater(len(records), 0)
+        for r in records:
+            iid = r.get("id")
+            for k in ["official_model", "model_essay", "model_essay_v1", "model_essay_v2"]:
+                val = r.get(k, "")
+                if val:
+                    self.assertEqual(val.count("!"), 0, f"{iid} {k} contains exclamation marks!")
+                    # Check contractions
+                    contr = [w for w in val.split() if any(c in w for c in ["'", "’"]) and w.lower() in [
+                        "i'm", "i’m", "it's", "it’s", "don't", "don’t", "can't", "can’t", "you'll", "you’ll",
+                        "they'll", "they’ll", "we'd", "we’d", "you're", "you’re", "isn't", "isn’t"
+                    ]]
+                    self.assertEqual(len(contr), 0, f"{iid} {k} contains contractions: {contr}")
+
+            for expr in r.get("extractable_expressions", []):
+                self.assertEqual(expr.count("!"), 0, f"{iid} extractable expr contains '!': {expr}")
+
+    def test_20_batch_update_example(self):
+        """Verify 'batch-update --example' outputs valid JSON schema and exits 0."""
+        res = self.run_cmd(["batch-update", "--example"])
+        self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertIn("task_id", data)
+        self.assertIn("status_updates", data)
+        self.assertIn("new_items", data)
+        self.assertGreater(len(data["new_items"]), 0)
+
+    def test_21_archive_example_and_auto_word_count(self):
+        """Verify 'archive --example' works, and archive automatically computes body word count when omitted."""
+        # 1. archive --example
+        res_ex = self.run_cmd(["archive", "--example"])
+        self.assertEqual(res_ex.returncode, 0)
+        self.assertIn("archive", res_ex.stdout)
+
+        # 2. archive with omitted word_count
+        test_essay = (
+            "Dear Li Ming,\n\n"
+            "    Congratulations on your admission to such a prestigious university. I am writing to offer some suggestions on how to get prepared for university life.\n\n"
+            "    To begin with, you had better learn to manage your monthly budget by keeping a record of your spending, or you may run out of money before the month ends. Besides, you are encouraged to get along with your roommates, who will be your closest companions for the next four years. As for your studies, it is never too early to gain exposure to your major, which will undoubtedly help you navigate your career path.\n\n"
+            "    Anyway, I wish you a fulfilling and rewarding university life.\n\n"
+            "                                        Yours sincerely,\n"
+            "                                        Zhang Wei\n"
+        )
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".md") as tf:
+            tf.write(test_essay)
+            temp_path = tf.name
+
+        try:
+            res_arch = self.run_cmd([
+                "archive",
+                "--title", "Test Auto Word Count",
+                "--genre", "advice",
+                "--year", "2011",
+                "--task-id", "TEST-AUTO-WC",
+                "--file", temp_path
+            ])
+            self.assertEqual(res_arch.returncode, 0, f"archive failed: {res_arch.stderr}\n{res_arch.stdout}")
+            self.assertIn("[OK] 范文已成功归档至:", res_arch.stdout)
+
+            # Find generated archive file and inspect word count header
+            archives_dir = KB_ROOT / "user_brain" / "satisfaction_archives" / "task1"
+            arch_files = list(archives_dir.glob("*_Test_Auto_Word_Count.md"))
+            self.assertGreater(len(arch_files), 0)
+            with open(arch_files[0], "r", encoding="utf-8") as af:
+                arch_text = af.read()
+            self.assertIn("- **字数统计**：109 词", arch_text)
+
+            # Cleanup test archive file
+            arch_files[0].unlink()
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_22_admission_rules_tolerance(self):
+        """Verify check_admission_rules tolerates '考纲核心' and phrase without explicit verb_phrase."""
+        from kb_manager import check_admission_rules
+
+        # 1. Tolerates synonymous exam_band
+        item1 = {
+            "category": "phrase",
+            "source": "2011真题",
+            "intent": "了解领域",
+            "expression": "gain exposure to [field]",
+            "exam_band": "考纲核心"
+        }
+        ok, reason = check_admission_rules(item1)
+        self.assertTrue(ok, f"Expected OK, got: {reason}")
+        self.assertEqual(item1["exam_band"], "大纲内")
+        self.assertEqual(item1["verb_phrase"], "gain exposure to [field]")
+
+        # 2. Strict rejection on invalid category
+        item2 = {
+            "category": "invalid_cat",
+            "source": "2011真题",
+            "intent": "测试"
+        }
+        ok2, reason2 = check_admission_rules(item2)
+        self.assertFalse(ok2)
+        self.assertIn("Invalid category", reason2)
+
 if __name__ == "__main__":
     unittest.main()
 
