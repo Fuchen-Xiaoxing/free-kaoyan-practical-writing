@@ -134,8 +134,8 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
 
 | 教学阶段 | 允许使用的结构武器 | 禁用结构清单 | 教学定位 |
 | :--- | :--- | :--- | :--- |
-| **阶段 1：基础版批改教学** | • 主谓宾承重骨架 (S+V+O)<br>• 基础定语从句 (`which will + verb`)<br>• 基础目的状语 (`in order to / so as to`)<br>• 基础并列复合句 (`not only... but also...`) | ❌ **严禁伴随状语 (`thereby doing...`)**<br>❌ **严禁虚拟倒装 (`Had it not been for...`)**<br>❌ **严禁冷僻生造学术词** | **保分底线**：消除语病与硬伤，确保要点 100% 齐全，大纲词汇通畅落地。 |
-| **阶段 2：高级版升华教学** | • 分词伴随状语 (`thereby facilitating...`)<br>• 经典虚拟倒装 (`Had it not been for your guidance...`)<br>• 独立主格与介词短语前置<br>• 外刊级高阶动词承重与精准同位语 | ❌ **禁用无中生有编造细节**<br>❌ **禁用脱离大纲的 GRE 偏难怪词** | **冲刺满分**：官方真题范文标尺对齐，展现母语级公文质感。 |
+| **阶段 1：基础版批改教学** | • 主谓宾承重骨架 (S+V+O)<br>• 基础定语从句 (`which will + verb`)<br>• 基础目的状语 (`in order to / so as to`)<br>• 基础并列复合句 (`not only... but also...`) | [禁止] **严禁伴随状语 (`thereby doing...`)**<br>[禁止] **严禁虚拟倒装 (`Had it not been for...`)**<br>[禁止] **严禁冷僻生造学术词** | **保分底线**：消除语病与硬伤，确保要点 100% 齐全，大纲词汇通畅落地。 |
+| **阶段 2：高级版升华教学** | • 分词伴随状语 (`thereby facilitating...`)<br>• 经典虚拟倒装 (`Had it not been for your guidance...`)<br>• 独立主格与介词短语前置<br>• 外刊级高阶动词承重与精准同位语 | [禁止] **禁用无中生有编造细节**<br>[禁止] **禁用脱离大纲的 GRE 偏难怪词** | **冲刺满分**：官方真题范文标尺对齐，展现母语级公文质感。 |
 
 > [!IMPORTANT]
 > **阶段 1 批改中严禁提前输出高级版改句**。阶段 1 逐句讲解的示范改句必须是**且仅是【合规基础句】**。高级版句式仅在阶段 2 用户定稿后统一升华输出。
@@ -161,7 +161,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **④ 增量式积木组装**：
     - **Step 1 (核心主干)**：`This meeting focuses on traditional Chinese culture...`
     - **Step 2 (嵌入定格与闭环)**：`This meeting focuses on traditional Chinese culture, which will facilitate mutual communication among international peers.`
-  - **💡 造句心法**：主干立骨架，动词挑大梁，积木定边界；永远用具象行为动词推动交际。
+  - **【造句心法】**：主干立骨架，动词挑大梁，积木定边界；永远用具象行为动词推动交际。
 *(阶段 2 高级版升华形态参考：Revolving around traditional Chinese culture, this session aims to cement enduring bonds of mutual understanding among international peers.)*
 
 ---
@@ -183,7 +183,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **④ 增量式积木组装**：
     - **Step 1 (核心主干)**：`It would be a sound policy for the library administration to buy more academic books...`
     - **Step 2 (嵌入定格与闭环)**：`It would be a sound policy for the library administration to buy more academic books, which will help students prepare for final exams.`
-  - **💡 造句心法**：建议信拒用生硬 should，用委婉公文框架立骨架，用定从挂载务实成效。
+  - **【造句心法】**：建议信拒用生硬 should，用委婉公文框架立骨架，用定从挂载务实成效。
 *(阶段 2 高级版升华形态参考：It would be a sound policy for the administration to enrich the repository of authoritative academic reference volumes, which will notably facilitate students' in-depth research.)*
 
 ---
@@ -204,7 +204,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **④ 增量式积木组装**：
     - **Step 1 (核心主干)**：`You are warmly welcome to share your study methods...`
     - **Step 2 (嵌入身份与定格)**：`As an experienced student, you are warmly welcome to share your study methods with fellow classmates.`
-  - **💡 造句心法**：邀请信先定格嘉宾专长身份，再用具象动词落地分享动作。
+  - **【造句心法】**：邀请信先定格嘉宾专长身份，再用具象动词落地分享动作。
 *(阶段 2 高级版升华形态参考：Given your multicultural background, your presence as a guest speaker would provide fellow students with invaluable academic insights.)*
 
 ---
@@ -225,7 +225,7 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **④ 增量式积木组装**：
     - **Step 1 (核心主干)**：`This newly purchased device keeps shutting down unexpectedly...`
     - **Step 2 (嵌入功能闭环)**：`This newly purchased device keeps shutting down unexpectedly, which makes it impossible for me to study.`
-  - **💡 造句心法**：投诉信先摆客观故障事实，再用因果从句克制陈述切实损失，杜绝情绪谩骂。
+  - **【造句心法】**：投诉信先摆客观故障事实，再用因果从句克制陈述切实损失，杜绝情绪谩骂。
 *(阶段 2 高级版升华形态参考：This newly purchased gadget persistently suffers from erratic system freezes, which renders it virtually impossible for me to complete academic tasks.)*
 
 ---
@@ -247,5 +247,5 @@ Step 1: 立骨架 (S+V+O)  ➔  Step 2: 嵌定格修饰 (积木A+B)  ➔  Step 3
   - **④ 增量式积木组装**：
     - **Step 1 (核心主干)**：`It is advisable for you to practice your presentation...`
     - **Step 2 (嵌入定格与闭环)**：`It is advisable for you to practice your presentation with your friends, so that you can become confident.`
-  - **💡 造句心法**：回信提议要落到具体实操动作，用目的状语连接心理或实效闭环。
+  - **【造句心法】**：回信提议要落到具体实操动作，用目的状语连接心理或实效闭环。
 *(阶段 2 高级版升华形态参考：Conducting a timed rehearsal in front of supportive peers will notably bolster your verbal fluency and onstage confidence.)*

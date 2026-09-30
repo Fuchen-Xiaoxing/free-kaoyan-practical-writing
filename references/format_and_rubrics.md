@@ -67,7 +67,7 @@ campus Wi-Fi infrastructure.
      | :--- | :--- | :--- | :--- |
      | **知道姓名** (师长/外宾/已知负责人) | `Dear Mr. Smith,` / `Dear Professor Wang,` | `Yours sincerely,` | 严禁加 the（如 `Dear Curator,`）；末尾必加英文逗号 `,` |
      | **不知道姓名** (未知具体机构负责人) | `Dear Sir or Madam,` | `Yours faithfully,` | 严禁斜杠 `Dear Sir/Madam`，严禁复数 `Dear Sirs` |
-     | **朋友私人书信** (邀请信/感谢信/同侪) | `Dear XXX,` (如 `Dear John,` / `Dear Friends,`) | `Best wishes,` 或 `Kind regards,` (亦可用 `Best regards,`) | 🚨 **生死红线**：朋友私人信坚决严禁使用 `Yours sincerely,`（过于官僚扣得体度分） |
+     | **朋友私人书信** (邀请信/感谢信/同侪) | `Dear XXX,` (如 `Dear John,` / `Dear Friends,`) | `Best wishes,` 或 `Kind regards,` (亦可用 `Best regards,`) | 【生死红线】：朋友私人信坚决严禁使用 `Yours sincerely,`（过于官僚扣得体度分） |
 4. **署名（靠右写）**：
    - **在结尾敬语的下一行，同样靠右对齐，首字母大写**；
    - **考纲指定唯一合法署名：`Li Ming`**（不得写本人真实姓名，不得自创 Peter 等名字）；
@@ -162,11 +162,11 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
    - **书信与电子邮件正文默认可聪明地省略日期**（考纲评分并不强制要求书信写日期，不写立省出错风险）。
 2. **零缩写铁律（Formal Register）**：
    - 严禁任何形式的日常口语缩写：
-     - ❌ `don't` ➔ ✅ `do not`
-     - ❌ `can't` ➔ ✅ `cannot`
-     - ❌ `I'd / I'm` ➔ ✅ `I would / I am`
-     - ❌ `won't` ➔ ✅ `will not`
-     - ❌ `it's` ➔ ✅ `it is`
+     - [禁用] `don't` ➔ [规范] `do not`
+     - [禁用] `can't` ➔ [规范] `cannot`
+     - [禁用] `I'd / I'm` ➔ [规范] `I would / I am`
+     - [禁用] `won't` ➔ [规范] `will not`
+     - [禁用] `it's` ➔ [规范] `it is`
 3. **零感叹号铁律**：
    - 考研公文考查理性、客观、专业的事务沟通，**全篇严禁出现感叹号（`!`）**，一律使用句号（`.`）。
 4. **唯一合法署名**：
@@ -183,9 +183,9 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
    - **核心议题与宗旨**：如 `cross-cultural academic exchange`，用具体动词说明目的；
    - **角色期望与分工**：如 `serve as a guest speaker to share your insights`。
 2. **严禁无中生有的画蛇添足（扣分重灾区）**：
-   - ❌ **严禁虚构未提及的附件/日程/技术参数**：题干未提示任何附件或具体技术参数时，坚决不要套写附件说明（如 `Enclosed is...`）或编造具体参数编号，阅卷人会判定为生硬套用公文模板、脱离题干；
-   - ❌ **严禁脱离受众身份生搬硬套**：收信人为同班同窗时，严禁使用陈旧僵化的公文外交套话，应使用自然得体的现代同侪书信表达；
-   - ❌ **严禁过度假设与节外生枝**：不要额外编造与题干毫无关系的冗长背景故事，严格以 2-6-2 黄金结构推进。
+   - **严禁虚构未提及的附件/日程/技术参数**：题干未提示任何附件或具体技术参数时，坚决不要套写附件说明（如 `Enclosed is...`）或编造具体参数编号，阅卷人会判定为生硬套用公文模板、脱离题干；
+   - **严禁脱离受众身份生搬硬套**：收信人为同班同窗时，严禁使用陈旧僵化的公文外交套话，应使用自然得体的现代同侪书信表达；
+   - **严禁过度假设与节外生枝**：不要额外编造与题干毫无关系的冗长背景故事，严格以 2-6-2 黄金结构推进。
 
 ---
 
