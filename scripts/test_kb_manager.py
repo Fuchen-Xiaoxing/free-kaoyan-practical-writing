@@ -30,9 +30,15 @@ if sys.platform.startswith("win"):
     except Exception:
         pass
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-KB_ROOT = REPO_ROOT / "knowledge_base"
-SCRIPT_PATH = Path(__file__).resolve().parent / "kb_manager.py"
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_ROOT = SCRIPT_DIR.parent
+if (SKILL_ROOT / "knowledge_base").exists():
+    REPO_ROOT = SKILL_ROOT
+    KB_ROOT = SKILL_ROOT / "knowledge_base"
+else:
+    REPO_ROOT = SKILL_ROOT.parent
+    KB_ROOT = REPO_ROOT / "knowledge_base"
+SCRIPT_PATH = SCRIPT_DIR / "kb_manager.py"
 
 class TestKBManager(unittest.TestCase):
 
@@ -590,6 +596,43 @@ class TestKBManager(unittest.TestCase):
         ok2, reason2 = check_admission_rules(item2)
         self.assertFalse(ok2)
         self.assertIn("Invalid category", reason2)
+
+    def test_23_prompt_command_purity_and_gating(self):
+        """Verify 'prompt' command: pure projection without models, precise exam_type filter, and --full rejection."""
+        # 1. Precise single paper with --exam-type
+        res = self.run_cmd(["prompt", "--year", "2011", "--exam-type", "2"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("2011 English II · advice", res.stdout)
+        self.assertIn("Zhang Wei", res.stdout)
+        self.assertIn("Directions", res.stdout)
+        # Verify 100% NO model essay text in output
+        self.assertNotIn("I am immensely thrilled", res.stdout)
+        self.assertNotIn("Congratulations on your admission to such a prestigious university!", res.stdout)
+        self.assertNotIn("Dear Li Ming,", res.stdout)
+        self.assertNotIn("Yours sincerely,", res.stdout)
+
+        # 2. JSON output purity
+        res_json = self.run_cmd(["prompt", "--year", "2011", "--exam-type", "2", "--json"])
+        self.assertEqual(res_json.returncode, 0)
+        data = json.loads(res_json.stdout)
+        self.assertEqual(data["year"], "2011")
+        self.assertEqual(data["exam_type"], "English II")
+        self.assertEqual(data["mandated_signoff"], "Zhang Wei")
+        self.assertNotIn("official_model", data)
+        self.assertNotIn("extractable_expressions", data)
+        self.assertNotIn("model_advanced", data)
+
+        # 3. Dual papers without --exam-type
+        res_dual = self.run_cmd(["prompt", "--year", "2011"])
+        self.assertEqual(res_dual.returncode, 0)
+        self.assertIn("共检索到 2 篇", res_dual.stdout)
+        self.assertIn("2011 English I · recommendation", res_dual.stdout)
+        self.assertIn("2011 English II · advice", res_dual.stdout)
+
+        # 4. Strict argument rejection: --full must FAIL
+        res_full = self.run_cmd(["prompt", "--year", "2011", "--exam-type", "2", "--full"])
+        self.assertNotEqual(res_full.returncode, 0)
+        self.assertIn("unrecognized arguments: --full", res_full.stderr + res_full.stdout)
 
 if __name__ == "__main__":
     unittest.main()

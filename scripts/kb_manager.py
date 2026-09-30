@@ -591,6 +591,116 @@ def cmd_anchor(args):
         else:
             print(f"\n• [提示] 官方范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
 
+def extract_mandated_signoff(prompt: str) -> str:
+    """从 Directions 题干中提取官方指定署名，未指定时默认为 Li Ming"""
+    if not prompt:
+        return "Li Ming (默认)"
+    m = re.search(r'Use\s+["“]([^"”]+)["”]\s+instead', prompt, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    m2 = re.search(r'sign\s+your\s+name\s+as\s+["“]([^"”]+)["”]', prompt, re.IGNORECASE)
+    if m2:
+        return m2.group(1).strip()
+    return "Li Ming (默认)"
+
+def cmd_prompt(args):
+    """
+    专门为阶段 0/1（审题、零碎句诊断、三栏清单、基础版批改与偏题拦截）设计的题干调取接口。
+    核心安全机制：数据投影（Projection），物理剔除官方范文与高能句式骨架，彻底杜绝阶段 1 上下文污染。
+    """
+    paths = get_paths()
+    anchors = read_jsonl(paths["anchors"])
+
+    genre_target = normalize_genre(args.genre) if args.genre else None
+    year_target = str(args.year).strip() if args.year else None
+    exam_target = str(args.exam_type).strip().lower() if getattr(args, "exam_type", None) else None
+
+    if exam_target:
+        if exam_target in ("1", "英一", "eng1", "english1", "english 1", "english i"):
+            exam_target_norm = "english i"
+        elif exam_target in ("2", "英二", "eng2", "english2", "english 2", "english ii"):
+            exam_target_norm = "english ii"
+        else:
+            exam_target_norm = exam_target
+    else:
+        exam_target_norm = None
+
+    if not genre_target and not year_target and not exam_target_norm:
+        print("[ERROR] 请至少指定 --year、--exam-type 或 --genre 参数之一。", file=sys.stderr)
+        return
+
+    matches = []
+    for item in anchors:
+        item_genre = str(item.get("genre", "")).lower()
+        item_year = str(item.get("year", ""))
+        item_exam = str(item.get("exam_type", "")).lower()
+        if genre_target:
+            if genre_target != item_genre and genre_target not in item_genre:
+                continue
+        if year_target:
+            if year_target != item_year:
+                continue
+        if exam_target_norm:
+            if exam_target_norm in ("english i", "english ii"):
+                if exam_target_norm != item_exam:
+                    continue
+            elif exam_target_norm not in item_exam:
+                continue
+        matches.append(item)
+
+    if not matches and genre_target:
+        for item in anchors:
+            text = f"{item.get('prompt', '')} {item.get('register_analysis', '')} {' '.join(item.get('tags', []))}".lower()
+            if genre_target in text:
+                matches.append(item)
+
+    if not matches:
+        print(f"[PROMPT] 未检索到匹配的官方真题题干 (genre={genre_target}, year={year_target}, exam_type={exam_target_norm})。")
+        return
+
+    # 数据投影：只保留题干、要点、语域、指定落款，物理删除所有范文和抽取骨架
+    projected = []
+    for m in matches:
+        clean = {
+            "id": m.get("id"),
+            "year": m.get("year"),
+            "exam_type": m.get("exam_type"),
+            "genre": m.get("genre"),
+            "relationship": m.get("relationship", "未标注"),
+            "register": m.get("register", "neutral_formal"),
+            "prompt": m.get("prompt", ""),
+            "key_points": m.get("key_points", []),
+            "register_analysis": m.get("register_analysis", ""),
+            "mandated_signoff": extract_mandated_signoff(m.get("prompt", "")),
+            "source_file": m.get("source_file", "")
+        }
+        projected.append(clean)
+
+    if args.json:
+        print(json.dumps(projected if len(projected) > 1 else projected[0], ensure_ascii=False, indent=2))
+        return
+
+    if len(projected) > 1:
+        print(f"=== 官方真题题干与审题标尺 (共检索到 {len(projected)} 篇，存在卷别分支) ===")
+        print("• [注意] 检测到当年存在英一/英二双卷。若未指明卷别，请直接追问学员确认！\n")
+        for idx, p in enumerate(projected, 1):
+            print(f"--- 【卷别选项 #{idx}】 {p['year']} {p['exam_type']} · {p['genre']} ---")
+            print(f"• 官方指定署名: {p['mandated_signoff']}")
+            print(f"• 试题要求 (Prompt):\n  {p['prompt']}")
+            print(f"• 核心采分点 (Key Points): {', '.join(p['key_points'])}")
+            print(f"• 语域档位: {p['register']} ({p['relationship']})\n")
+    else:
+        p = projected[0]
+        print(f"=== 官方真题要求与审题基准标尺: {p['year']} {p['exam_type']} · {p['genre']} ===")
+        print(f"• 受众权责关系: {p['relationship']} | 语域档位: {p['register']}")
+        print(f"• 【官方指定署名】: {p['mandated_signoff']}")
+        print(f"• 试题要求 (Directions):\n{p['prompt']}")
+        print("• 核心采分要点 (Key Points):")
+        for kp in p['key_points']:
+            print(f"  - {kp}")
+        print(f"• 语域与语气深度剖析:\n  {p['register_analysis']}")
+        print("\n*(本命令已对官方范文执行物理级隔离，输出中 100% 零范文泄露)*")
+
 def cmd_query(args):
     paths = get_paths()
     results = []
@@ -1962,6 +2072,16 @@ def main():
     p_anchor.add_argument("--model-version", choices=["all", "1", "2"], default="all", help="Select model version for exams supporting dual models (1: 高级范文, 2: 满分习作, all: 完整展示)")
     p_anchor.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # prompt
+    p_prompt = subparsers.add_parser(
+        "prompt",
+        help="Query official past paper prompt, directions, key points and rubrics (strictly omits model essays)"
+    )
+    p_prompt.add_argument("--genre", type=str, default=None, help="Genre (e.g. advice, reply_letter, invitation)")
+    p_prompt.add_argument("--year", type=str, default=None, help="Exam year (optional)")
+    p_prompt.add_argument("--exam-type", type=str, default=None, help="Filter by exam type ('1', '2', '英一', '英二', 'English I', 'English II')")
+    p_prompt.add_argument("--json", action="store_true", help="Output as JSON")
+
     # batch-update
     batch_epilog = """
 JSON Payload Schema for batch-update:
@@ -2060,6 +2180,8 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
         cmd_status(args)
     elif args.command == "query":
         cmd_query(args)
+    elif args.command == "prompt":
+        cmd_prompt(args)
     elif args.command == "anchor":
         cmd_anchor(args)
     elif args.command == "append":
