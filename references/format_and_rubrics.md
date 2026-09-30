@@ -75,7 +75,7 @@ campus Wi-Fi infrastructure.
 
 ---
 
-### 2. 告示 / 通知（Notice）
+### 2. 告示 / 通知（Notice / Announcement）
 
 ```text
                                 Notice
@@ -93,9 +93,9 @@ volunteer@university.edu.cn prior to May 18th.
 ```
 
 #### 视觉生死线：
-1. **标题居中**：第一行居中书写 `Notice` 或 `NOTICE`；
-2. **日期位置**：标题下方靠右书写英文日期（如 `May 10th, 2025`）；
-3. **称呼**：**告示文体【坚决没有称呼】**（严禁写 Dear all / Dear students）；
+1. **标题居中**：第一行居中书写 `Notice` 或 `Announcement`（全部大写 `NOTICE` / `ANNOUNCEMENT` 亦可）；
+2. **日期位置（写在标题下一行的右侧）**：**必须写在标题下一行的右侧**，靠右书写标准英文日期（如 `May 10th, 2025`）；严禁使用纯阿拉伯数字（如 `2025.05.10` 会被阅卷判为暗号作弊）；
+3. **称呼**：**告示文体【坚决没有称呼】**（严禁写 `Dear all` / `Dear students` / `Dear Friends`）；
 4. **正文**：首行缩进 4 字符，段间不空行；
 5. **落款**：右下角署名发布机构（如 `The Postgraduate Association` / `The Organizing Committee`），**告示结尾严禁署名 Li Ming**。
 
@@ -205,6 +205,7 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 - [ ] **段落缩进**：一般分为三段（目的、细节、收尾），每一段的第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间坚决不空行
 - [ ] **结尾敬语**：单独占一行，整体靠右对齐（或与署名右对齐），首字母大写，末尾加逗号 `,`（知道姓名用 Yours sincerely,；不知姓名用 Yours faithfully,；朋友私人信必须用 Best wishes, 或 Kind regards,）
 - [ ] **署名格式**：在结尾敬语下一行同样靠右对齐，首字母大写落款 Li Ming，末尾绝无句号 `.`
+- [ ] **告示特例自查**：标题居中写 Notice/Announcement，日期写在标题下一行的右侧，正文坚决无称呼，结尾署名机构（绝不署名 Li Ming）
 - [ ] **语言纯洁**：全文 0 处口语缩写（0 处 don't / can't / I'm）
 - [ ] **标点纯洁**：全文 0 处感叹号 `!`
 - [ ] **词数达标**：正文稳定在 90~110 词（约 10~12 行）
