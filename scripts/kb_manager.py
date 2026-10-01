@@ -101,7 +101,7 @@ MASTERY_RANK = {
     "未接触": 1
 }
 
-VALID_CATEGORIES = {"word", "phrase", "sentence", "functional_sentence", "template", "structure"}
+VALID_CATEGORIES = {"word", "phrase", "sentence", "functional_sentence", "template", "structure", "morpheme"}
 VALID_STATUSES = {"active", "dormant", "retired"}
 VALID_REGISTERS = {"informal_peer", "neutral_formal", "formal_authority", "public_notice"}
 VALID_SECTIONS = {"opening", "body", "closing", "format", "any"}
@@ -234,12 +234,9 @@ def get_base_dir() -> Path:
     return get_builtin_base_dir()
 
 def init_user_brain(user_brain_dir: Path = None, force_reset: bool = False) -> Path:
-    """初始化或格式化用户外脑目录（自动播种出厂种子与旧数据迁移）"""
+    """初始化或格式化用户外脑目录（白纸化纯净就绪，绝不拷贝出厂种子）"""
     if user_brain_dir is None:
         user_brain_dir = get_user_brain_dir()
-
-    base_dir = get_builtin_base_dir()
-    seed_t1 = base_dir / "user_brain" / "task1_expressions.jsonl"
 
     if user_brain_dir.name == "user_brain":
         ub_sub = user_brain_dir
@@ -251,6 +248,18 @@ def init_user_brain(user_brain_dir: Path = None, force_reset: bool = False) -> P
     target_hist = ub_sub / "history.log"
     target_sess = ub_sub / "sessions"
 
+    # Dual-warehouse structure
+    target_shared_dir = ub_sub / "shared"
+    target_shared_morph = target_shared_dir / "morphemes.jsonl"
+
+    target_t1_dir = ub_sub / "task1"
+    target_t1_v2 = target_t1_dir / "expressions.jsonl"
+    target_t1_tasks = target_t1_dir / "tasks.jsonl"
+
+    target_t2_dir = ub_sub / "task2"
+    target_t2_v2 = target_t2_dir / "expressions.jsonl"
+    target_t2_tasks = target_t2_dir / "tasks.jsonl"
+
     # Archives target: 优先满意范文/task1
     if user_brain_dir.name == "写作外脑" or (user_brain_dir / "满意范文").exists() or not (ub_sub / "satisfaction_archives").exists():
         target_arch = user_brain_dir / "满意范文" / "task1"
@@ -258,71 +267,70 @@ def init_user_brain(user_brain_dir: Path = None, force_reset: bool = False) -> P
         target_arch = ub_sub / "satisfaction_archives" / "task1"
 
     ub_sub.mkdir(parents=True, exist_ok=True)
+    target_shared_dir.mkdir(parents=True, exist_ok=True)
+    target_t1_dir.mkdir(parents=True, exist_ok=True)
+    target_t2_dir.mkdir(parents=True, exist_ok=True)
     target_arch.mkdir(parents=True, exist_ok=True)
     target_sess.mkdir(parents=True, exist_ok=True)
 
     now_iso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if force_reset or not target_t1.exists() or target_t1.stat().st_size == 0:
-        if not force_reset:
-            # 尝试向上跨级自愈迁移：检测 workspace 中是否有遗留的学习数据
-            legacy_candidates = [
-                Path("/var/minis/workspace/考研英语/写作外脑/user_brain/task1_expressions.jsonl"),
-            ]
-            migrated = False
-            for leg in legacy_candidates:
-                if leg.exists() and leg.resolve() != target_t1.resolve() and leg.stat().st_size > 0:
-                    try:
-                        leg_items = read_jsonl(leg)
-                        has_progress = any(it.get("mastery") != "未接触" or it.get("version", 1) > 1 for it in leg_items)
-                        if has_progress:
-                            write_jsonl(target_t1, leg_items)
-                            leg_tasks = leg.parent / "tasks.jsonl"
-                            if leg_tasks.exists():
-                                shutil.copy2(leg_tasks, target_tasks)
-                            print(f"[MIGRATE] 检测到历史有效学习数据，已自动迁移至外部外脑: {user_brain_dir}")
-                            migrated = True
-                            break
-                    except Exception:
-                        pass
-            if migrated:
-                return user_brain_dir
-
-        # 播种纯净出厂种子
-        if seed_t1.exists() and seed_t1.resolve() != target_t1.resolve():
-            shutil.copy2(seed_t1, target_t1)
-        elif not target_t1.exists():
-            target_t1.touch()
-
-        if force_reset or not target_tasks.exists():
-            with open(target_tasks, "w", encoding="utf-8") as f:
-                pass
-
-        if force_reset or not target_hist.exists():
-            with open(target_hist, "w", encoding="utf-8") as f:
-                entry = {
-                    "ts": now_iso,
-                    "op": "init",
-                    "id": "SYS_INIT",
-                    "before": None,
-                    "after": "出厂纯净写作外脑种子就绪",
-                    "reason": "格式化重置并初始化考研小作文出厂外脑" if force_reset else "初始化考研小作文出厂外脑",
-                    "task_id": ""
-                }
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-        # 标记外脑元数据
-        meta_file = user_brain_dir / ".kb_meta.json"
-        try:
-            with open(meta_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "initialized_at": now_iso,
-                    "version": "1.0.0",
-                    "storage_type": "external_mount" if "/mounts/" in str(user_brain_dir) else "local",
-                    "clean_factory": True
-                }, f, ensure_ascii=False, indent=2)
-        except Exception:
+    # 1. 纯净白纸初始化：shared morphemes 保持 0 记录
+    if force_reset or not target_shared_morph.exists():
+        with open(target_shared_morph, "w", encoding="utf-8") as f:
             pass
+
+    # 2. 纯净白纸初始化：task1 expressions 保持 0 记录
+    if force_reset or not target_t1_v2.exists():
+        with open(target_t1_v2, "w", encoding="utf-8") as f:
+            pass
+
+    # 3. 兼容层单文件：task1_expressions.jsonl 保持 0 记录
+    if force_reset or not target_t1.exists():
+        with open(target_t1, "w", encoding="utf-8") as f:
+            pass
+
+    if force_reset or not target_t1_tasks.exists():
+        with open(target_t1_tasks, "w", encoding="utf-8") as f:
+            pass
+    if force_reset or not target_tasks.exists():
+        with open(target_tasks, "w", encoding="utf-8") as f:
+            pass
+
+    if force_reset or not target_t2_v2.exists():
+        with open(target_t2_v2, "w", encoding="utf-8") as f:
+            pass
+    if force_reset or not target_t2_tasks.exists():
+        with open(target_t2_tasks, "w", encoding="utf-8") as f:
+            pass
+
+    # 4. 审计流水日志
+    if force_reset or not target_hist.exists():
+        with open(target_hist, "a" if not force_reset and target_hist.exists() else "w", encoding="utf-8") as f:
+            entry = {
+                "ts": now_iso,
+                "op": "init",
+                "id": "SYS_INIT",
+                "before": None,
+                "after": "个人写作外脑已就绪（纯净白纸状态：0条条目）",
+                "reason": "格式化重置并初始化纯净个人外脑" if force_reset else "初始化纯净个人外脑",
+                "task_id": ""
+            }
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # 5. 标记外脑元数据
+    meta_file = user_brain_dir / ".kb_meta.json"
+    try:
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "initialized_at": now_iso,
+                "version": "2.0.0",
+                "storage_type": "external_mount" if "/mounts/" in str(user_brain_dir) else "local",
+                "clean_factory": True,
+                "decoupled_seeds": True
+            }, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
     return user_brain_dir
 
@@ -340,13 +348,23 @@ def get_paths(kb_dir: Path = None, base_kb_dir: Path = None, user_brain_dir: Pat
         user_brain_dir = get_user_brain_dir()
 
     # 确定 user_brain 子目录
-    if user_brain_dir.name == "user_brain":
+    if (user_brain_dir / "shared" / "morphemes.jsonl").exists() or (user_brain_dir / "task1" / "expressions.jsonl").exists():
+        ub_sub = user_brain_dir
+    elif (user_brain_dir / "user_brain").exists():
+        ub_sub = user_brain_dir / "user_brain"
+    elif user_brain_dir.name == "user_brain":
         ub_sub = user_brain_dir
     else:
         ub_sub = user_brain_dir / "user_brain"
 
     # 确定范文归档目录
-    if (user_brain_dir / "满意范文" / "task1").exists():
+    if (ub_sub / "task1" / "archive").exists():
+        archives_dir = ub_sub / "task1" / "archive"
+        archives_root = ub_sub / "task1"
+    elif (user_brain_dir / "task1" / "archive").exists():
+        archives_dir = user_brain_dir / "task1" / "archive"
+        archives_root = user_brain_dir / "task1"
+    elif (user_brain_dir / "满意范文" / "task1").exists():
         archives_dir = user_brain_dir / "满意范文" / "task1"
         archives_root = user_brain_dir / "满意范文"
     elif (ub_sub / "satisfaction_archives" / "task1").exists():
@@ -356,29 +374,49 @@ def get_paths(kb_dir: Path = None, base_kb_dir: Path = None, user_brain_dir: Pat
         archives_dir = user_brain_dir / "satisfaction_archives" / "task1"
         archives_root = user_brain_dir / "satisfaction_archives"
     else:
-        if user_brain_dir.name == "写作外脑" or (user_brain_dir / "满意范文").exists():
+        if (ub_sub / "task1").exists():
+            archives_dir = ub_sub / "task1" / "archive"
+            archives_root = ub_sub / "task1"
+        elif user_brain_dir.name == "写作外脑" or (user_brain_dir / "满意范文").exists():
             archives_dir = user_brain_dir / "满意范文" / "task1"
             archives_root = user_brain_dir / "满意范文"
         else:
             archives_dir = ub_sub / "satisfaction_archives" / "task1"
             archives_root = ub_sub / "satisfaction_archives"
 
-    t1_file = ub_sub / "task1_expressions.jsonl"
-    # 若外脑未初始化且处于挂载/持久目录，自动触发静默播种
-    if not t1_file.exists() and user_brain_dir != base_kb_dir:
+    t1_file = ub_sub / "task1" / "expressions.jsonl" if (ub_sub / "task1" / "expressions.jsonl").exists() else (ub_sub / "task1_expressions.jsonl")
+    # 若外脑未初始化且处于挂载/持久目录，自动触发静默初始化白纸
+    if not t1_file.exists() and not (ub_sub / "task1" / "expressions.jsonl").exists() and user_brain_dir != base_kb_dir:
         init_user_brain(user_brain_dir, force_reset=False)
+        t1_file = ub_sub / "task1" / "expressions.jsonl" if (ub_sub / "task1" / "expressions.jsonl").exists() else (ub_sub / "task1_expressions.jsonl")
+
+    seed_shared = base_kb_dir / "seeds" / "shared_morphemes.seed.jsonl"
+    if not seed_shared.exists():
+        seed_shared = base_kb_dir / "shared" / "scenario_morphemes.jsonl"
+
+    seed_t1 = base_kb_dir / "seeds" / "task1_expressions.seed.jsonl"
+    if not seed_t1.exists():
+        seed_t1 = base_kb_dir / "user_brain" / "task1_expressions.jsonl"
 
     return {
         "base_root": base_kb_dir,
         "user_root": user_brain_dir,
         "task1": t1_file,
-        "shared": base_kb_dir / "shared" / "scenario_morphemes.jsonl",
+        "shared": seed_shared,
         "anchors": base_kb_dir / "anchors" / "task1_past_papers.jsonl",
         "archives": archives_dir,
         "archives_root": archives_root,
-        "tasks": ub_sub / "tasks.jsonl",
+        "tasks": ub_sub / "task1" / "tasks.jsonl" if (ub_sub / "task1" / "tasks.jsonl").exists() else (ub_sub / "tasks.jsonl"),
         "history_log": ub_sub / "history.log",
-        "sessions": ub_sub / "sessions"
+        "sessions": ub_sub / "sessions",
+        # Explicit dual-warehouse paths
+        "user_shared": ub_sub / "shared" / "morphemes.jsonl",
+        "user_task1": ub_sub / "task1" / "expressions.jsonl",
+        "user_task1_tasks": ub_sub / "task1" / "tasks.jsonl",
+        "user_task2_expressions": ub_sub / "task2" / "expressions.jsonl",
+        "user_task2_tasks": ub_sub / "task2" / "tasks.jsonl",
+        "seed_shared": seed_shared,
+        "seed_task1": seed_t1
     }
 
 
@@ -408,6 +446,61 @@ def write_jsonl(file_path: Path, records: list):
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     temp_path.replace(file_path)
 
+def is_id_match(id1: str, id2: str) -> bool:
+    if not id1 or not id2:
+        return False
+    id1_s = str(id1).strip()
+    id2_s = str(id2).strip()
+    if id1_s == id2_s:
+        return True
+    s1 = re.sub(r'_(SEN|TMP|STR)_', '_', id1_s)
+    s2 = re.sub(r'_(SEN|TMP|STR)_', '_', id2_s)
+    return s1 == s2
+
+def save_user_task1(paths: dict, records: list):
+    """Write task1 records and synchronize legacy flat structure and v2 hierarchy."""
+    written_paths = set()
+    for p_key in ("task1", "user_task1"):
+        p = paths.get(p_key)
+        if p:
+            rp = p.resolve()
+            if rp not in written_paths:
+                write_jsonl(p, records)
+                written_paths.add(rp)
+    user_root = paths.get("user_root")
+    if user_root:
+        for legacy_candidate in [
+            user_root / "user_brain" / "task1_expressions.jsonl",
+            user_root / "task1_expressions.jsonl",
+        ]:
+            if legacy_candidate.exists():
+                rp = legacy_candidate.resolve()
+                if rp not in written_paths:
+                    write_jsonl(legacy_candidate, records)
+                    written_paths.add(rp)
+
+def save_user_shared(paths: dict, records: list):
+    """Write shared records and synchronize dual-warehouse & legacy files."""
+    written_paths = set()
+    p = paths.get("user_shared")
+    if p:
+        rp = p.resolve()
+        if rp not in written_paths:
+            write_jsonl(p, records)
+            written_paths.add(rp)
+    user_root = paths.get("user_root")
+    if user_root:
+        for legacy_candidate in [
+            user_root / "user_brain" / "shared_morphemes.jsonl",
+            user_root / "shared_morphemes.jsonl",
+            user_root / "user_brain" / "shared" / "morphemes.jsonl"
+        ]:
+            if legacy_candidate.exists():
+                rp = legacy_candidate.resolve()
+                if rp not in written_paths:
+                    write_jsonl(legacy_candidate, records)
+                    written_paths.add(rp)
+
 def log_history(paths: dict, op: str, item_id: str, before: any, after: any, reason: str = "", task_id: str = ""):
     hist_file = paths["history_log"]
     hist_file.parent.mkdir(parents=True, exist_ok=True)
@@ -429,28 +522,30 @@ def normalize_key(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 def check_admission_rules(item: dict) -> tuple[bool, str]:
-    cat = item.get("category", "functional_sentence")
+    cat = item.get("category") or item.get("type") or "functional_sentence"
     if cat not in VALID_CATEGORIES:
         return False, f"Invalid category: {cat}. Must be one of {sorted(list(VALID_CATEGORIES))}"
 
     # 1. Reusability: must contain slots or be template/structure
     if cat in ("functional_sentence", "sentence"):
-        expr = item.get("expression", "")
+        expr = item.get("text") or item.get("expression", "")
         if not re.search(r"\[.*?\]", expr) and not item.get("slots"):
             return False, "Not reusable: functional_sentence/sentence expression lacks slots [x] or variable placeholders."
     elif cat in ("template", "structure"):
         pass
-    elif cat in ("word", "phrase"):
-        if not item.get("verb_phrase") and not item.get("term") and not item.get("pattern"):
+    elif cat in ("word", "phrase", "morpheme"):
+        if not item.get("verb_phrase") and not item.get("term") and not item.get("pattern") and not item.get("text"):
             if item.get("expression"):
                 item["verb_phrase"] = item["expression"]
             else:
                 return False, "Word/phrase missing head term, verb_phrase or expression."
+        if not item.get("verb_phrase") and item.get("text"):
+            item["verb_phrase"] = item["text"]
 
     # 2. Source and intent required
     if not item.get("source"):
         return False, "Missing required field: source"
-    if not item.get("intent") and not item.get("intent_cn"):
+    if not item.get("intent") and not item.get("intent_cn") and not item.get("meaning"):
         return False, "Missing required field: intent/intent_cn"
 
     # 3. Exam band check
@@ -703,7 +798,6 @@ def cmd_prompt(args):
 
 def cmd_query(args):
     paths = get_paths()
-    results = []
 
     target_type = args.type.lower()
     genre_filter = normalize_genre(args.genre) if args.genre else None
@@ -716,18 +810,36 @@ def cmd_query(args):
     if genre_filter and genre_filter in GENRE_TO_SCENARIOS:
         allowed_scenarios = set(GENRE_TO_SCENARIOS[genre_filter])
 
-    task1_ids = set()
-    # 1. Load task1 expressions
+    limit = args.limit
+
+    # =========================================================================
+    # Tier 1: 个人外脑优先检索 (Tier 1: Personal User Brain Assets)
+    # =========================================================================
+    user_results = []
+    user_keys = set()
+    user_ids = set()
+    seen_result_ids = set()
+    seen_result_keys = set()
+
+    # 1.1 读取个人小作文专属表达仓
+    user_t1_items = []
     if target_type in ("all", "task1"):
-        task1_items = read_jsonl(paths["task1"])
-        for item in task1_items:
-            if "id" in item:
-                task1_ids.add(item["id"])
-            # Hard filter: status
-            if item.get("status") == "retired":
-                continue
-            # Hard filter: exam_band
-            if item.get("exam_band") == "超纲":
+        if paths["user_task1"].exists():
+            user_t1_items = read_jsonl(paths["user_task1"])
+        elif paths["task1"].exists():
+            user_t1_items = read_jsonl(paths["task1"])
+
+        for item in user_t1_items:
+            iid = item.get("id", "")
+            raw_key = item.get("text") or item.get("expression") or item.get("intent", "")
+            k = normalize_key(raw_key) if raw_key else ""
+            if iid:
+                user_ids.add(iid)
+            if k:
+                user_keys.add(k)
+
+            # 过滤 retired 与超纲
+            if item.get("status") == "retired" or item.get("exam_band") == "超纲":
                 continue
 
             item_genre = normalize_genre(item.get("genre", ""))
@@ -744,44 +856,58 @@ def cmd_query(args):
                     continue
 
             if scenario_filter:
-                text_to_search = f"{item.get('intent', '')} {item.get('intent_cn', '')} {item.get('expression', '')} {item.get('verb_phrase', '')} {item.get('scenario', '')} {' '.join(item.get('tags', []))}".lower()
+                text_to_search = f"{item.get('intent', '')} {item.get('intent_cn', '')} {item.get('expression', '')} {item.get('text', '')} {item.get('verb_phrase', '')} {item.get('scenario', '')} {' '.join(item.get('tags', []))}".lower()
                 if scenario_filter not in text_to_search:
                     continue
 
-            # Calculate relevance score
-            score = 1.0
+            if iid and iid in seen_result_ids:
+                continue
+            if k and k in seen_result_keys:
+                continue
+            if iid:
+                seen_result_ids.add(iid)
+            if k:
+                seen_result_keys.add(k)
+
+            # 外脑资产权重加成 (大幅优先于底座种子)
+            score = 10.0
             if item_genre == genre_filter:
                 score += 3.0
             score += MASTERY_RANK.get(item.get("mastery", "未接触"), 1)
             hist = item.get("history", {})
-            if hist.get("error_use_count", 0) > 0:
+            if isinstance(hist, dict) and hist.get("error_use_count", 0) > 0:
                 score -= 2.0
             if item.get("status") == "dormant":
                 score -= 1.5
 
             item["_score"] = score
-            results.append(item)
+            item["source_tier"] = "user_brain"
+            item["is_borrowed"] = False
+            user_results.append(item)
 
-    # 2. Load shared scenario morphemes
+    # 1.2 读取个人共享场景语素仓
+    user_shared_items = []
     if target_type in ("all", "shared"):
-        shared_items = read_jsonl(paths["shared"])
-        for item in shared_items:
-            if item.get("id") in task1_ids:
-                continue
-            if item.get("status") == "retired":
-                continue
-            if item.get("exam_band") == "超纲":
+        if paths["user_shared"].exists():
+            user_shared_items = read_jsonl(paths["user_shared"])
+        for item in user_shared_items:
+            iid = item.get("id", "")
+            raw_key = item.get("text") or item.get("verb_phrase") or item.get("expression") or item.get("meaning", "")
+            k = normalize_key(raw_key) if raw_key else ""
+            if iid:
+                user_ids.add(iid)
+            if k:
+                user_keys.add(k)
+
+            if item.get("status") == "retired" or item.get("exam_band") == "超纲":
                 continue
 
             item_scenario = str(item.get("scenario", "")).strip()
-
-            # P0-3 & D03: Strict scenario relevance filtering
             if scenario_filter:
-                text_to_search = f"{item_scenario} {item.get('intent_cn', '')} {item.get('verb_phrase', '')}".lower()
+                text_to_search = f"{item_scenario} {item.get('meaning', '')} {item.get('intent_cn', '')} {item.get('verb_phrase', '')} {item.get('text', '')}".lower()
                 if scenario_filter not in text_to_search:
                     continue
             elif genre_filter:
-                # If genre is given, morpheme MUST belong to allowed scenarios!
                 if allowed_scenarios and item_scenario not in allowed_scenarios:
                     continue
 
@@ -791,103 +917,214 @@ def cmd_query(args):
             if section_filter and section_filter not in ("body", "any"):
                 continue
 
-            score = 1.0
+            if iid and iid in seen_result_ids:
+                continue
+            if k and k in seen_result_keys:
+                continue
+            if iid:
+                seen_result_ids.add(iid)
+            if k:
+                seen_result_keys.add(k)
+
+            score = 10.0
             if allowed_scenarios and item_scenario in allowed_scenarios:
                 score += 2.5
             score += MASTERY_RANK.get(item.get("mastery", "未接触"), 1)
             hist = item.get("history", {})
-            if hist.get("error_use_count", 0) > 0:
+            if isinstance(hist, dict) and hist.get("error_use_count", 0) > 0:
                 score -= 2.0
             if item.get("status") == "dormant":
                 score -= 1.5
 
             item["_score"] = score
-            results.append(item)
+            item["source_tier"] = "user_brain"
+            item["is_borrowed"] = False
+            user_results.append(item)
+
+    # 1.3 个人外脑三栏分类
+    ub_mastered = []
+    ub_to_learn = []
+    ub_templates = []
+
+    for item in user_results:
+        m = item.get("mastery", "未接触")
+        cat = item.get("category") or item.get("type") or ""
+        caution = item.get("caution", False)
+        if cat in ("template", "structure"):
+            ub_templates.append(item)
+        elif m in ("稳定", "敢用") and not caution:
+            ub_mastered.append(item)
+        else:
+            ub_to_learn.append(item)
+
+    ub_mastered.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    ub_to_learn.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    ub_templates.sort(key=lambda x: x.get("_score", 0), reverse=True)
+
+    # 1.4 从个人外脑按配额提取
+    pick_m = ub_mastered[:min(2, limit)]
+    user_pick_t = ub_templates[:min(1, max(0, limit - len(pick_m)))]
+    rem_for_learn = max(0, limit - len(pick_m) - len(user_pick_t))
+    user_pick_l = ub_to_learn[:min(2, rem_for_learn)]
+
+    # =========================================================================
+    # Tier 2: 系统底座仅作缺额兜底借调 (Tier 2: System Base Borrowing on Deficit)
+    # =========================================================================
+    sys_pick_t = []
+    sys_pick_l = []
+
+    # 2.1 结构/模板缺额借调：当且仅当个人外脑在该文类下未积累任何模板/结构时借调
+    target_templates_quota = min(1, max(0, limit - len(pick_m)))
+    deficit_t = target_templates_quota - len(user_pick_t)
+    if deficit_t > 0 and target_type in ("all", "task1"):
+        seed_t1_items = read_jsonl(paths["seed_task1"])
+        candidate_t = []
+        for s_item in seed_t1_items:
+            cat = s_item.get("category") or s_item.get("type") or ""
+            if cat not in ("template", "structure"):
+                continue
+            item_genre = normalize_genre(s_item.get("genre", ""))
+            if genre_filter and genre_filter != item_genre and item_genre not in ("general", "common", "all", "shared"):
+                continue
+
+            raw_k = normalize_key(s_item.get("text") or s_item.get("expression") or s_item.get("intent", ""))
+            if raw_k in user_keys or s_item.get("id") in user_ids or s_item.get("id") in seen_result_ids:
+                continue
+
+            score = 1.0
+            if item_genre == genre_filter:
+                score += 3.0
+            s_item["_score"] = score
+            candidate_t.append(s_item)
+
+        candidate_t.sort(key=lambda x: x.get("_score", 0), reverse=True)
+        for t_item in candidate_t[:deficit_t]:
+            t_item["source_tier"] = "system_seeds"
+            t_item["is_borrowed"] = True
+            sys_pick_t.append(t_item)
+
+    pick_t = user_pick_t + sys_pick_t
+
+    # 2.2 新学语素缺额借调：当且仅当个人外脑在新学语素上未凑满配额时借调
+    rem_quota_l = max(0, limit - len(pick_m) - len(pick_t))
+    target_l_quota = min(2, rem_quota_l)
+    deficit_l = max(0, target_l_quota - len(user_pick_l))
+
+    if deficit_l > 0:
+        candidate_l = []
+
+        # (a) 从共享场景语素底座检索
+        if target_type in ("all", "shared"):
+            seed_shared_items = read_jsonl(paths["seed_shared"])
+            for s_item in seed_shared_items:
+                if s_item.get("status") == "retired" or s_item.get("exam_band") == "超纲":
+                    continue
+                item_sc = str(s_item.get("scenario", "")).strip()
+                if scenario_filter:
+                    text_s = f"{item_sc} {s_item.get('meaning', '')} {s_item.get('intent_cn', '')} {s_item.get('verb_phrase', '')} {s_item.get('text', '')}".lower()
+                    if scenario_filter not in text_s:
+                        continue
+                elif genre_filter:
+                    if allowed_scenarios and item_sc not in allowed_scenarios:
+                        continue
+
+                raw_k = normalize_key(s_item.get("text") or s_item.get("verb_phrase") or s_item.get("meaning", ""))
+                if raw_k in user_keys or s_item.get("id") in user_ids or s_item.get("id") in seen_result_ids:
+                    continue
+
+                score = 1.0
+                if allowed_scenarios and item_sc in allowed_scenarios:
+                    score += 2.5
+                s_item["_score"] = score
+                candidate_l.append(s_item)
+
+        # (b) 从小作文功能句底座检索（若共享语素不足）
+        if target_type in ("all", "task1"):
+            seed_t1_items = read_jsonl(paths["seed_task1"])
+            for s_item in seed_t1_items:
+                cat = s_item.get("category") or s_item.get("type") or ""
+                if cat in ("template", "structure"):
+                    continue
+                item_genre = normalize_genre(s_item.get("genre", ""))
+                if genre_filter and genre_filter != item_genre and item_genre not in ("general", "common", "all", "shared"):
+                    continue
+
+                raw_k = normalize_key(s_item.get("text") or s_item.get("expression") or s_item.get("intent", ""))
+                if raw_k in user_keys or s_item.get("id") in user_ids or s_item.get("id") in seen_result_ids:
+                    continue
+
+                score = 1.0
+                if item_genre == genre_filter:
+                    score += 2.0
+                s_item["_score"] = score
+                candidate_l.append(s_item)
+
+        candidate_l.sort(key=lambda x: x.get("_score", 0), reverse=True)
+        for l_item in candidate_l[:deficit_l]:
+            l_item["source_tier"] = "system_seeds"
+            l_item["is_borrowed"] = True
+            sys_pick_l.append(l_item)
+
+    pick_l = user_pick_l + sys_pick_l
+
+    # 合并最终三栏条目
+    all_picked = pick_m + pick_l + pick_t
 
     if args.json:
-        results.sort(key=lambda x: x.get("_score", 0), reverse=True)
-        print(json.dumps(results[:args.limit], ensure_ascii=False, indent=2))
+        all_picked.sort(key=lambda x: x.get("_score", 0), reverse=True)
+        print(json.dumps(all_picked[:args.limit], ensure_ascii=False, indent=2))
         return
 
-    if not results:
+    if not all_picked:
         print(f"[KB] 未检索到匹配的条目 (genre={genre_filter}, scenario={scenario_filter}, status={status_filter})。")
         return
-
-    # Structured 3-column grouping
-    # Group 1: 本题可用已掌握 (mastery in 稳定, 敢用)
-    # Group 2: 本题建议新学 (mastery in 学习中, 未接触)
-    # Group 3: 本题建议结构/模板 (category in template, structure)
-    mastered = []
-    to_learn = []
-    templates = []
-
-    for item in results:
-        m = item.get("mastery", "未接触")
-        cat = item.get("category", "")
-        if cat in ("template", "structure"):
-            templates.append(item)
-        elif m in ("稳定", "敢用"):
-            mastered.append(item)
-        else:
-            to_learn.append(item)
-
-    # Sort each group by score
-    mastered.sort(key=lambda x: x.get("_score", 0), reverse=True)
-    to_learn.sort(key=lambda x: x.get("_score", 0), reverse=True)
-    templates.sort(key=lambda x: x.get("_score", 0), reverse=True)
-
-    limit = args.limit
-    # Strict Quota: mastered <= 2, to_learn <= 2, templates <= 1, total <= limit
-    pick_m = mastered[:min(2, limit)]
-    pick_t = templates[:min(1, max(0, limit - len(pick_m)))]
-    rem = max(0, limit - len(pick_m) - len(pick_t))
-    pick_l = to_learn[:min(2, rem)]
-
-    # Total picked (P3-1: limit is upper bound, do not force-pad irrelevant items)
-    all_picked = pick_m + pick_l + pick_t
 
     def print_item(i, item):
         item_id = item.get("id", "N/A")
         mastery = item.get("mastery", "未接触")
         m_note = f"（{item.get('mastery_note')}）" if item.get("mastery_note") else ""
-        cat = item.get("category", "")
+        cat = item.get("type") or item.get("category", "")
         reg = item.get("register", "neutral_formal")
         sec = item.get("section", "body")
+        c_note = f" (注意: {item.get('caution_note')})" if item.get("caution_note") else ""
+        borrowed_tag = " [系统借调]" if item.get("is_borrowed") else ""
 
         if cat == "functional_sentence":
-            intent = item.get("intent", "")
-            expr = item.get("expression", "")
+            intent = item.get("meaning") or item.get("intent", "")
+            expr = item.get("text") or item.get("expression", "")
             slots = item.get("slots", {})
             slots_desc = " | ".join([f"{k}: {v}" for k, v in slots.items()]) if slots else "无"
-            print(f"  {i}. [{item_id}] 【{mastery}{m_note}】 {intent}")
+            print(f"  {i}. [{item_id}]{borrowed_tag} 【{mastery}{m_note}】 {intent}{c_note}")
             print(f"     表达骨架: `{expr}`")
             if slots:
                 print(f"     槽位指引: {slots_desc}")
             print(f"     段位/语域: 段位: {sec} | 语域: {reg}")
-        elif cat == "phrase" or "verb_phrase" in item:
+        elif cat in ("phrase", "morpheme") or "verb_phrase" in item or item_id.startswith("M_"):
             scenario = item.get("scenario", "")
-            intent_cn = item.get("intent_cn", item.get("intent", ""))
-            phrase = item.get("verb_phrase", "")
-            collocations = ", ".join(item.get("typical_collocations", []))
-            print(f"  {i}. [{item_id}] 【{mastery}{m_note}】 语素 ({scenario}): {intent_cn}")
+            intent_cn = item.get("meaning") or item.get("intent_cn", item.get("intent", ""))
+            phrase = item.get("text") or item.get("verb_phrase") or item.get("expression", "")
+            colloc_list = item.get("collocations") or item.get("typical_collocations", [])
+            collocations = ", ".join(colloc_list) if isinstance(colloc_list, list) else str(colloc_list)
+            print(f"  {i}. [{item_id}]{borrowed_tag} 【{mastery}{m_note}】 语素 ({scenario}): {intent_cn}{c_note}")
             print(f"     动宾短语: `{phrase}`")
             if collocations:
                 print(f"     典型搭配: {collocations}")
             print(f"     段位/语域: 段位: {sec} | 语域: {reg}")
         elif cat == "template":
-            intent = item.get("intent", "")
+            intent = item.get("meaning") or item.get("intent", "")
             budget = item.get("word_budget", "100-110")
-            print(f"  {i}. [{item_id}] 【{mastery}】 篇章模板: {intent} (建议词数: {budget})")
+            print(f"  {i}. [{item_id}]{borrowed_tag} 【{mastery}】 篇章模板: {intent} (建议词数: {budget})")
             blocks = item.get("blocks", [])
             if blocks:
                 preview = " / ".join([b.strip().replace('\n', ' ') for b in blocks[:3]])
                 print(f"     骨架预览: `{preview}`")
         elif cat == "structure":
-            intent = item.get("intent", "")
+            intent = item.get("meaning") or item.get("intent", "")
             plan = item.get("section_plan", [])
-            plan_desc = " ➔ ".join([f"{p.get('section')}({p.get('sentences')}句/{p.get('words')}词)" for p in plan])
-            print(f"  {i}. [{item_id}] 【{mastery}】 篇章结构: {intent}")
-            print(f"     段落规划: {plan_desc}")
+            plan_desc = " ➔ ".join([f"{p.get('section')}({p.get('sentences')}句/{p.get('words')}词)" for p in plan]) if plan else ""
+            print(f"  {i}. [{item_id}]{borrowed_tag} 【{mastery}】 篇章结构: {intent}")
+            if plan_desc:
+                print(f"     段落规划: {plan_desc}")
 
     print(f"=== 写作前知识库检索清单 (共 {len(all_picked)} 条，上限 {limit} 条，宁缺毋滥) ===\n")
 
@@ -923,13 +1160,15 @@ def generate_item_id(target: str, item: dict, existing_records: list) -> str:
     if target == "task1":
         g = item.get("genre", "general").lower()
         code = GENRE_CODE_MAP.get(g, "GEN")
-        cat = item.get("category", "functional_sentence")
+        cat = item.get("category") or item.get("type") or "functional_sentence"
         
         prefix = f"T1_{code}_"
         if cat == "template":
             prefix = f"T1_{code}_TMP_"
         elif cat == "structure":
             prefix = f"T1_{code}_STR_"
+        elif cat in ("functional_sentence", "sentence"):
+            prefix = f"T1_{code}_SEN_"
 
         max_seq = 0
         for r in existing_records:
@@ -1050,7 +1289,10 @@ def cmd_append(args):
         print(f"[ADDED] 成功录入: [{item['id']}] {item.get('intent', item.get('intent_cn', ''))}")
 
     if added_count > 0:
-        write_jsonl(target_path, current_records)
+        if target == "task1":
+            save_user_task1(paths, current_records)
+        else:
+            save_user_shared(paths, current_records)
         print(f"[OK] 成功追加 {added_count} 条条目至 {target_path.name}。")
     else:
         print("[INFO] 未有新条目写入。")
@@ -1143,7 +1385,9 @@ def cmd_batch_update(args):
     # 1. Process status updates
     if status_updates:
         task1_records = read_jsonl(paths["task1"])
+        user_shared_records = read_jsonl(paths["user_shared"]) if paths["user_shared"].exists() else []
         shared_records = read_jsonl(paths["shared"])
+        seed_t1_records = read_jsonl(paths["seed_task1"]) if paths["seed_task1"].exists() else []
         is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
         updated_count = 0
 
@@ -1158,122 +1402,111 @@ def cmd_batch_update(args):
                 continue
 
             found = False
-            # Check task1 first
-            for rec in task1_records:
-                if rec.get("id") == t_id:
-                    old_st = rec.get("mastery", "未接触")
-                    hist = rec.setdefault("history", {
-                        "recommended_count": 0, "used_count": 0, "last_used": None,
-                        "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
-                        "consecutive_recommended_no_use": 0, "user_notes": ""
-                    })
 
-                    used_tasks = set(hist.get("used_in_tasks", []))
-                    if task_id:
-                        used_tasks.add(task_id)
-                        hist["used_in_tasks"] = sorted(list(used_tasks))
+            def apply_status_rec(rec, display_id):
+                old_st = rec.get("mastery", "未接触")
+                hist = rec.setdefault("history", {
+                    "recommended_count": 0, "used_count": 0, "last_used": None,
+                    "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
+                    "consecutive_recommended_no_use": 0, "user_notes": ""
+                })
 
-                    hist["last_used"] = now_iso
-                    hist["used_count"] = hist.get("used_count", 0) + 1
+                used_tasks = set(hist.get("used_in_tasks", []))
+                if task_id:
+                    used_tasks.add(task_id)
+                    hist["used_in_tasks"] = sorted(list(used_tasks))
 
-                    # P1-2: Mastery evidence model
-                    actual_st = proposed_st
-                    if is_error or "瑕疵" in note or "用错" in note:
-                        hist["error_use_count"] = hist.get("error_use_count", 0) + 1
-                        actual_st = "敢用"
-                        rec["mastery_note"] = "需注意"
-                    elif is_independent:
-                        hist["independent_use_count"] = hist.get("independent_use_count", 0) + 1
-                        if len(used_tasks) >= 2 or hist["independent_use_count"] >= 1:
-                            actual_st = "稳定"
-                            rec["mastery_note"] = ""
-                        else:
-                            actual_st = "敢用"
+                hist["last_used"] = now_iso
+                hist["used_count"] = hist.get("used_count", 0) + 1
+
+                actual_st = proposed_st
+                if is_error or "瑕疵" in note or "用错" in note:
+                    hist["error_use_count"] = hist.get("error_use_count", 0) + 1
+                    actual_st = "敢用"
+                    rec["mastery_note"] = "需注意"
+                elif is_independent:
+                    hist["independent_use_count"] = hist.get("independent_use_count", 0) + 1
+                    if len(used_tasks) >= 2 or hist["independent_use_count"] >= 1:
+                        actual_st = "稳定"
+                        rec["mastery_note"] = ""
                     else:
-                        if actual_st == "稳定":
-                            actual_st = "敢用"
+                        actual_st = "敢用"
+                else:
+                    if actual_st == "稳定":
+                        actual_st = "敢用"
 
-                    rec["mastery"] = actual_st
-                    rec["version"] = rec.get("version", 1) + 1
+                rec["mastery"] = actual_st
+                rec["version"] = rec.get("version", 1) + 1
 
-                    evidence = rec.setdefault("status_evidence", {})
-                    evidence["last_promotion_reason"] = f"{actual_st}: {note}"
-                    evidence["last_evidence_task_id"] = task_id
+                evidence = rec.setdefault("status_evidence", {})
+                evidence["last_promotion_reason"] = f"{actual_st}: {note}"
+                evidence["last_evidence_task_id"] = task_id
 
-                    if note:
-                        prev = hist.get("user_notes", "")
-                        hist["user_notes"] = f"{prev}; [{now_iso}] {note}".strip("; ")
+                if note:
+                    prev = hist.get("user_notes", "")
+                    hist["user_notes"] = f"{prev}; [{now_iso}] {note}".strip("; ")
 
-                    log_history(paths, "update_status", t_id, old_st, actual_st, note, task_id)
-                    print(f"  [STATUS] [{t_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
+                log_history(paths, "update_status", display_id, old_st, actual_st, note, task_id)
+                print(f"  [STATUS] [{display_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
+
+            # Check user task1 first
+            for rec in task1_records:
+                if is_id_match(rec.get("id"), t_id):
+                    apply_status_rec(rec, t_id)
                     found = True
                     updated_count += 1
                     break
 
-            # If not in task1, check shared
-            if not found:
-                for rec in shared_records:
-                    if rec.get("id") == t_id:
-                        old_st = rec.get("mastery", "未接触")
-                        hist = rec.setdefault("history", {
-                            "recommended_count": 0, "used_count": 0, "last_used": None,
-                            "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
-                            "consecutive_recommended_no_use": 0, "user_notes": ""
-                        })
-
-                        used_tasks = set(hist.get("used_in_tasks", []))
-                        if task_id:
-                            used_tasks.add(task_id)
-                            hist["used_in_tasks"] = sorted(list(used_tasks))
-
-                        hist["last_used"] = now_iso
-                        hist["used_count"] = hist.get("used_count", 0) + 1
-
-                        actual_st = proposed_st
-                        if is_error or "瑕疵" in note or "用错" in note:
-                            hist["error_use_count"] = hist.get("error_use_count", 0) + 1
-                            actual_st = "敢用"
-                            rec["mastery_note"] = "需注意"
-                        elif is_independent:
-                            hist["independent_use_count"] = hist.get("independent_use_count", 0) + 1
-                            if len(used_tasks) >= 2 or hist["independent_use_count"] >= 1:
-                                actual_st = "稳定"
-                                rec["mastery_note"] = ""
-                            else:
-                                actual_st = "敢用"
-                        else:
-                            if actual_st == "稳定":
-                                actual_st = "敢用"
-
-                        rec["mastery"] = actual_st
-                        rec["version"] = rec.get("version", 1) + 1
-
-                        evidence = rec.setdefault("status_evidence", {})
-                        evidence["last_promotion_reason"] = f"{actual_st}: {note}"
-                        evidence["last_evidence_task_id"] = task_id
-
-                        if note:
-                            prev = hist.get("user_notes", "")
-                            hist["user_notes"] = f"{prev}; [{now_iso}] {note}".strip("; ")
-
-                        log_history(paths, "update_status", t_id, old_st, actual_st, note, task_id)
-                        print(f"  [STATUS] [{t_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
-                        if not is_shared_writable:
-                            # Promote into task1 expressions to protect read-only base
-                            task1_records.append(rec)
+            # If not in task1, check user shared
+            if not found and user_shared_records:
+                for rec in user_shared_records:
+                    if is_id_match(rec.get("id"), t_id):
+                        apply_status_rec(rec, t_id)
                         found = True
                         updated_count += 1
                         break
 
-        write_jsonl(paths["task1"], task1_records)
-        if is_shared_writable:
+            # If not found in user brain, check seed task1 (promote to user task1)
+            if not found and seed_t1_records:
+                for seed_rec in seed_t1_records:
+                    if is_id_match(seed_rec.get("id"), t_id):
+                        rec_copy = dict(seed_rec)
+                        apply_status_rec(rec_copy, t_id)
+                        task1_records.append(rec_copy)
+                        found = True
+                        updated_count += 1
+                        break
+
+            # If not found, check seed shared
+            if not found and shared_records:
+                for seed_rec in shared_records:
+                    if is_id_match(seed_rec.get("id"), t_id):
+                        rec_copy = dict(seed_rec)
+                        apply_status_rec(rec_copy, t_id)
+                        if is_shared_writable:
+                            pass
+                        else:
+                            task1_records.append(rec_copy)
+                            if paths["user_shared"].parent.exists():
+                                user_shared_records.append(rec_copy)
+                        found = True
+                        updated_count += 1
+                        break
+
+        save_user_task1(paths, task1_records)
+        if user_shared_records:
+            save_user_shared(paths, user_shared_records)
+        elif is_shared_writable:
             write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 已成功更新 {updated_count} 条条目的掌握度状态。")
 
     # 2. Process new items
     if new_items:
         task1_records = read_jsonl(paths["task1"])
-        shared_records = read_jsonl(paths["shared"])
+        if paths["user_shared"].exists():
+            shared_records = read_jsonl(paths["user_shared"])
+        else:
+            shared_records = read_jsonl(paths["shared"])
         is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
         added_task1 = 0
         added_shared = 0
@@ -1297,7 +1530,16 @@ def cmd_batch_update(args):
                 print(f"  [SKIP] 条目已存在，跳过: {key}")
                 continue
 
-            if not is_shared_writable and target == "shared":
+            cat = item.get("category") or item.get("type") or ""
+            iid = str(item.get("id", ""))
+            is_morph = (target == "shared" or iid.startswith("M_") or item.get("type") == "morpheme" or (cat in ["phrase", "word"] and not item.get("slots")))
+            if is_morph:
+                target = "shared"
+            else:
+                target = "task1"
+
+            can_write_shared = paths["user_shared"].parent.exists() or is_shared_writable
+            if not can_write_shared and target == "shared":
                 target = "task1"
 
             if not item.get("id"):
@@ -1345,12 +1587,15 @@ def cmd_batch_update(args):
                 added_shared += 1
                 existing_keys.add(key)
                 log_history(paths, "batch_append", item["id"], None, item, "Batch new morpheme", task_id)
-                print(f"  [NEW] 追加至 shared: [{item['id']}] {item.get('intent_cn', '')} ({item.get('mastery', '')})")
+                print(f"  [NEW] 追加至 shared: [{item['id']}] {item.get('intent_cn', item.get('meaning', item.get('intent', '')))} ({item.get('mastery', '')})")
 
         if added_task1 > 0:
-            write_jsonl(paths["task1"], task1_records)
-        if added_shared > 0 and is_shared_writable:
-            write_jsonl(paths["shared"], shared_records)
+            save_user_task1(paths, task1_records)
+        if added_shared > 0:
+            if paths["user_shared"].parent.exists():
+                save_user_shared(paths, shared_records)
+            elif is_shared_writable:
+                write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 批量录入完成：追加 task1 条目 {added_task1} 条，shared 条目 {added_shared} 条。")
 
 def cmd_update_status(args):
@@ -1367,11 +1612,13 @@ def cmd_update_status(args):
 
     task1_records = read_jsonl(paths["task1"])
     shared_records = read_jsonl(paths["shared"])
+    user_shared_records = read_jsonl(paths["user_shared"]) if paths["user_shared"].exists() else []
+    seed_t1_records = read_jsonl(paths["seed_task1"]) if paths["seed_task1"].exists() else []
     is_shared_writable = paths["shared"].resolve().is_relative_to(paths["user_root"].resolve())
 
-    # Check task1 first
+    # 1. Check user task1 first
     for rec in task1_records:
-        if rec.get("id") == target_id:
+        if is_id_match(rec.get("id"), target_id):
             old_status = rec.get("mastery", "未接触")
             rec["mastery"] = new_status
             rec["version"] = rec.get("version", 1) + 1
@@ -1390,15 +1637,15 @@ def cmd_update_status(args):
                 hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
 
             log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
-            write_jsonl(paths["task1"], task1_records)
+            save_user_task1(paths, task1_records)
             print(f"[OK] 成功更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {paths['task1'].name})")
             updated = True
             break
 
-    # If not found in task1, check shared
-    if not updated:
-        for rec in shared_records:
-            if rec.get("id") == target_id:
+    # 2. Check user_shared
+    if not updated and user_shared_records:
+        for rec in user_shared_records:
+            if is_id_match(rec.get("id"), target_id):
                 old_status = rec.get("mastery", "未接触")
                 rec["mastery"] = new_status
                 rec["version"] = rec.get("version", 1) + 1
@@ -1417,13 +1664,82 @@ def cmd_update_status(args):
                     hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
 
                 log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
+                save_user_shared(paths, user_shared_records)
+                print(f"[OK] 成功更新共享条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {paths['user_shared'].name})")
+                updated = True
+                break
+
+    # 3. If not found in user brain, check system seeds (shared and task1) to promote!
+    if not updated:
+        # Check shared seeds
+        for rec in shared_records:
+            if is_id_match(rec.get("id"), target_id):
+                old_status = rec.get("mastery", "未接触")
+                rec_copy = dict(rec)
+                rec_copy["mastery"] = new_status
+                rec_copy["version"] = rec_copy.get("version", 1) + 1
+                hist = rec_copy.setdefault("history", {
+                    "recommended_count": 0, "used_count": 0, "last_used": None,
+                    "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
+                    "consecutive_recommended_no_use": 0, "user_notes": ""
+                })
+                hist["last_used"] = now_iso
+                if args.increment_used:
+                    hist["used_count"] = hist.get("used_count", 0) + 1
+                if args.increment_recommended:
+                    hist["recommended_count"] = hist.get("recommended_count", 0) + 1
+                if args.note:
+                    prev_notes = hist.get("user_notes", "")
+                    hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
+
+                log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
                 if is_shared_writable:
                     write_jsonl(paths["shared"], shared_records)
                     print(f"[OK] 成功更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (来源: {paths['shared'].name})")
                 else:
-                    task1_records.append(rec)
-                    write_jsonl(paths["task1"], task1_records)
+                    task1_records.append(rec_copy)
+                    save_user_task1(paths, task1_records)
                     print(f"[OK] 成功提升并更新条目 [{target_id}]: 状态 {old_status} -> {new_status} (已同步保存至用户外脑: {paths['task1'].name})")
+                if paths["user_shared"].parent.exists():
+                    u_sh = read_jsonl(paths["user_shared"])
+                    found_u = False
+                    for r in u_sh:
+                        if is_id_match(r.get("id"), target_id):
+                            r["mastery"] = new_status
+                            found_u = True
+                            break
+                    if not found_u:
+                        u_sh.append(rec_copy)
+                    save_user_shared(paths, u_sh)
+                updated = True
+                break
+
+    # 4. Check seed_task1
+    if not updated and seed_t1_records:
+        for rec in seed_t1_records:
+            if is_id_match(rec.get("id"), target_id):
+                old_status = rec.get("mastery", "未接触")
+                rec_copy = dict(rec)
+                rec_copy["mastery"] = new_status
+                rec_copy["version"] = rec_copy.get("version", 1) + 1
+                hist = rec_copy.setdefault("history", {
+                    "recommended_count": 0, "used_count": 0, "last_used": None,
+                    "used_in_tasks": [], "independent_use_count": 0, "error_use_count": 0,
+                    "consecutive_recommended_no_use": 0, "user_notes": ""
+                })
+                hist["last_used"] = now_iso
+                if args.increment_used:
+                    hist["used_count"] = hist.get("used_count", 0) + 1
+                if args.increment_recommended:
+                    hist["recommended_count"] = hist.get("recommended_count", 0) + 1
+                if args.note:
+                    prev_notes = hist.get("user_notes", "")
+                    hist["user_notes"] = f"{prev_notes}; [{now_iso}] {args.note}".strip("; ")
+
+                log_history(paths, "update_status", target_id, old_status, new_status, args.note or "", "")
+                task1_records.append(rec_copy)
+                save_user_task1(paths, task1_records)
+                print(f"[OK] 成功从底座借调转正条目 [{target_id}]: 状态 {old_status} -> {new_status} (已沉淀至用户专属仓: {paths['task1'].name})")
                 updated = True
                 break
 
@@ -1551,6 +1867,9 @@ python3 scripts/kb_manager.py archive \\
     }
     with open(tasks_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(task_entry, ensure_ascii=False) + "\n")
+    if paths["user_task1_tasks"].parent.exists():
+        with open(paths["user_task1_tasks"], "a", encoding="utf-8") as f:
+            f.write(json.dumps(task_entry, ensure_ascii=False) + "\n")
 
     print(f"[OK] 范文已成功归档至: {target_file}")
     print(f"[OK] 题目台账已同步至: {tasks_file}")
@@ -1666,99 +1985,7 @@ def cmd_verify(args):
     has_error = False
     total_valid = 0
 
-    # 1. Verify task1_expressions.jsonl
-    t1_path = paths["task1"]
-    if not t1_path.exists():
-        print(f"[FAIL] {t1_path.name} 文件不存在！", file=sys.stderr)
-        has_error = True
-    else:
-        seen_ids = set()
-        t1_records = []
-        with open(t1_path, "r", encoding="utf-8") as f:
-            for l_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    t1_records.append((l_num, json.loads(line)))
-                except json.JSONDecodeError as e:
-                    print(f"[FAIL] {t1_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
-                    has_error = True
-
-        for l_num, rec in t1_records:
-            r_id = rec.get("id")
-            if not r_id:
-                print(f"[FAIL] {t1_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
-                has_error = True
-            elif r_id in seen_ids:
-                print(f"[FAIL] {t1_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
-                has_error = True
-            else:
-                seen_ids.add(r_id)
-
-            cat = rec.get("category")
-            if cat not in VALID_CATEGORIES:
-                print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 category: {cat}", file=sys.stderr)
-                has_error = True
-
-            m = rec.get("mastery")
-            if m not in MASTERY_RANK:
-                print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 mastery: {m}", file=sys.stderr)
-                has_error = True
-
-            st = rec.get("status", "active")
-            if st not in VALID_STATUSES:
-                print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 status: {st}", file=sys.stderr)
-                has_error = True
-
-            if not rec.get("source"):
-                print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 缺少必填字段: source", file=sys.stderr)
-                has_error = True
-
-        print(f"[{'PASS' if not has_error else 'WARN'}] task1 ({t1_path.name}): 校验完成，有效记录 {len(t1_records)} 条。")
-        total_valid += len(t1_records)
-
-    # 2. Verify shared/scenario_morphemes.jsonl
-    sh_path = paths["shared"]
-    if not sh_path.exists():
-        print(f"[FAIL] {sh_path.name} 文件不存在！", file=sys.stderr)
-        has_error = True
-    else:
-        seen_ids = set()
-        sh_records = []
-        with open(sh_path, "r", encoding="utf-8") as f:
-            for l_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    sh_records.append((l_num, json.loads(line)))
-                except json.JSONDecodeError as e:
-                    print(f"[FAIL] {sh_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
-                    has_error = True
-
-        for l_num, rec in sh_records:
-            r_id = rec.get("id")
-            if not r_id:
-                print(f"[FAIL] {sh_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
-                has_error = True
-            elif r_id in seen_ids:
-                print(f"[FAIL] {sh_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
-                has_error = True
-            else:
-                seen_ids.add(r_id)
-
-            if not rec.get("scenario"):
-                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: scenario", file=sys.stderr)
-                has_error = True
-            if not rec.get("verb_phrase"):
-                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: verb_phrase", file=sys.stderr)
-                has_error = True
-
-        print(f"[{'PASS' if not has_error else 'WARN'}] shared ({sh_path.name}): 校验完成，有效记录 {len(sh_records)} 条。")
-        total_valid += len(sh_records)
-
-    # 3. Verify anchors/task1_past_papers.jsonl
+    # 1. Verify anchors/task1_past_papers.jsonl
     anc_path = paths["anchors"]
     if not anc_path.exists():
         print(f"[FAIL] {anc_path.name} 文件不存在！", file=sys.stderr)
@@ -1792,7 +2019,121 @@ def cmd_verify(args):
         print(f"[{'PASS' if not has_error else 'WARN'}] anchors ({anc_path.name}): 校验完成，有效记录 {len(anc_records)} 条。")
         total_valid += len(anc_records)
 
-    # 4. Verify satisfaction archives
+    # 2. Verify shared scenario morphemes (system base seeds)
+    sh_path = paths["shared"]
+    if not sh_path.exists():
+        print(f"[FAIL] {sh_path.name} 文件不存在！", file=sys.stderr)
+        has_error = True
+    else:
+        seen_ids = set()
+        sh_records = []
+        with open(sh_path, "r", encoding="utf-8") as f:
+            for l_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    sh_records.append((l_num, json.loads(line)))
+                except json.JSONDecodeError as e:
+                    print(f"[FAIL] {sh_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
+                    has_error = True
+
+        for l_num, rec in sh_records:
+            r_id = rec.get("id")
+            if not r_id:
+                print(f"[FAIL] {sh_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
+                has_error = True
+            elif r_id in seen_ids:
+                print(f"[FAIL] {sh_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
+                has_error = True
+            else:
+                seen_ids.add(r_id)
+
+            if not rec.get("scenario"):
+                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: scenario", file=sys.stderr)
+                has_error = True
+            if not rec.get("verb_phrase") and not rec.get("text"):
+                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: verb_phrase/text", file=sys.stderr)
+                has_error = True
+
+        print(f"[{'PASS' if not has_error else 'WARN'}] shared ({sh_path.name}): 校验完成，有效记录 {len(sh_records)} 条。")
+        total_valid += len(sh_records)
+
+    # 3. Verify task1_expressions.jsonl (user brain, allows 0 records for clean slate)
+    t1_check_paths = []
+    seen_check_paths = set()
+    for cand in [paths.get("user_task1"), paths.get("task1"), paths.get("user_root") / "user_brain" / "task1_expressions.jsonl"]:
+        if cand and cand.exists():
+            rp = cand.resolve()
+            if rp not in seen_check_paths:
+                t1_check_paths.append(cand)
+                seen_check_paths.add(rp)
+
+    if not t1_check_paths:
+        print(f"[FAIL] task1 文件不存在！", file=sys.stderr)
+        has_error = True
+    else:
+        for t1_path in t1_check_paths:
+            seen_ids = set()
+            t1_records = []
+            with open(t1_path, "r", encoding="utf-8") as f:
+                for l_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        t1_records.append((l_num, json.loads(line)))
+                    except json.JSONDecodeError as e:
+                        print(f"[FAIL] {t1_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
+                        has_error = True
+
+            for l_num, rec in t1_records:
+                r_id = rec.get("id")
+                if not r_id:
+                    print(f"[FAIL] {t1_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
+                    has_error = True
+                elif r_id in seen_ids:
+                    print(f"[FAIL] {t1_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
+                    has_error = True
+                else:
+                    seen_ids.add(r_id)
+
+                cat = rec.get("category") or rec.get("type")
+                if cat not in VALID_CATEGORIES:
+                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 category: {cat}", file=sys.stderr)
+                    has_error = True
+
+                m = rec.get("mastery")
+                if m not in MASTERY_RANK:
+                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 mastery: {m}", file=sys.stderr)
+                    has_error = True
+
+                st = rec.get("status", "active")
+                if st not in VALID_STATUSES:
+                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 status: {st}", file=sys.stderr)
+                    has_error = True
+
+                if not rec.get("source"):
+                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 缺少必填字段: source", file=sys.stderr)
+                    has_error = True
+
+            status_tag = 'PASS' if not has_error else 'WARN'
+            if len(t1_records) == 0:
+                print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，纯净白纸就绪 (有效实战积累 0 条)。")
+            else:
+                print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，有效记录 {len(t1_records)} 条。")
+            total_valid += len(t1_records)
+
+    # 4. Verify user_shared morphemes (allows 0 records)
+    if paths["user_shared"].exists():
+        u_sh_records = read_jsonl(paths["user_shared"])
+        if len(u_sh_records) == 0:
+            print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，纯净白纸就绪 (有效实战语素 0 条)。")
+        else:
+            print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，有效实战语素 {len(u_sh_records)} 条。")
+        total_valid += len(u_sh_records)
+
+    # 5. Verify satisfaction archives
     arch_dir = paths["archives"]
     if arch_dir.exists():
         md_files = list(arch_dir.glob("*.md"))
@@ -1964,14 +2305,23 @@ def cmd_init(args):
     user_root = init_user_brain(user_brain_dir=target_dir, force_reset=force_reset)
     paths = get_paths(user_brain_dir=user_root)
     print("==================== 考研小作文写作外脑初始化报告 ====================")
-    print(f"• 教研底座目录 (只读): {paths['base_root']}")
-    print(f"• 用户外脑目录 (读写): {paths['user_root']}")
-    print(f"• 执行动作: {'【格式化重置】出厂纯净播种' if force_reset else '【安全初始化】就绪探测'}")
-    t1_count = len(read_jsonl(paths["task1"]))
-    sh_count = len(read_jsonl(paths["shared"]))
-    anc_count = len(read_jsonl(paths["anchors"]))
-    print(f"• 表达库 (task1_expressions.jsonl): {t1_count} 条 (就绪)")
-    print(f"• 场景语素库 (scenario_morphemes.jsonl): {sh_count} 条 (只读底座)")
+    print(f"• 教研底座目录 (只读储备): {paths['base_root']}")
+    print(f"• 个人外脑目录 (专属实战): {paths['user_root']}")
+    print(f"• 执行动作: {'【格式化重置】纯净白纸初始化 (0记录白纸就绪)' if force_reset else '【安全初始化】纯净白纸探测'}")
+
+    user_morph_count = len(read_jsonl(paths["user_shared"])) if paths["user_shared"].exists() else 0
+    user_t1_count = len(read_jsonl(paths["user_task1"])) if paths["user_task1"].exists() else 0
+    seed_t1_count = len(read_jsonl(paths["seed_task1"])) if paths["seed_task1"].exists() else 0
+    seed_sh_count = len(read_jsonl(paths["seed_shared"])) if paths["seed_shared"].exists() else 0
+    anc_count = len(read_jsonl(paths["anchors"])) if paths["anchors"].exists() else 0
+
+    if user_t1_count == 0 and user_morph_count == 0:
+        print("• 个人外脑状态: 【100% 纯净白纸】(0 条出厂僵尸条目，只有实战确认表达才配入库)")
+    else:
+        print(f"• 个人专属仓 (task1/expressions.jsonl): {user_t1_count} 条 (实战确认)")
+        print(f"• 共享语素仓 (shared/morphemes.jsonl): {user_morph_count} 条 (实战确认)")
+
+    print(f"• 教研底座种子 (seeds): 包含 {seed_t1_count} 条小作文表达 + {seed_sh_count} 条共享语素 (只读底座，仅作缺额兜底借调)")
     print(f"• 历年真题标尺库 (task1_past_papers.jsonl): {anc_count} 篇 (只读底座)")
     print(f"• 范文归档目录: {paths['archives']}")
     print(f"• 题目台账路径: {paths['tasks']}")
@@ -1996,34 +2346,135 @@ def cmd_status(args):
         storage_type = "本地开发/单测环境兜底存储"
     print(f"• 外脑存储类型: {storage_type}")
 
-    t1_records = read_jsonl(paths["task1"])
-    sh_records = read_jsonl(paths["shared"])
-    anc_records = read_jsonl(paths["anchors"])
+    # 1. 教研底座只读储备
+    seed_t1_records = read_jsonl(paths["seed_task1"]) if paths["seed_task1"].exists() else []
+    seed_sh_records = read_jsonl(paths["seed_shared"]) if paths["seed_shared"].exists() else []
+    anc_records = read_jsonl(paths["anchors"]) if paths["anchors"].exists() else []
+    print(f"\n【一、教研底座 (只读储备，仅作缺额借调)】:")
+    print(f"• 历年真题标尺库: {len(anc_records)} 篇 (英一 2005-2025 全量真题标尺)")
+    print(f"• 出厂专属表达种子: {len(seed_t1_records)} 条 (小作文功能句与篇章模板)")
+    print(f"• 出厂场景语素种子: {len(seed_sh_records)} 条 (7大核心高频场景共享素材)")
 
-    mastery_counts = {"稳定": 0, "敢用": 0, "学习中": 0, "未接触": 0}
-    for r in t1_records:
-        m = r.get("mastery", "未接触")
-        mastery_counts[m] = mastery_counts.get(m, 0) + 1
-
-    print(f"• 个人词句外脑总数: {len(t1_records)} 条")
-    print(f"  - 掌握度分布: 稳定={mastery_counts['稳定']} | 敢用={mastery_counts['敢用']} | 学习中={mastery_counts['学习中']} | 未接触={mastery_counts['未接触']}")
-    print(f"• 场景语素底座: {len(sh_records)} 条")
-    print(f"• 历年真题标尺: {len(anc_records)} 篇 (英一 2005-2025 全量双范文原生支持)")
-
+    # 2. 个人外脑专属资产
+    user_morph_records = read_jsonl(paths["user_shared"]) if paths["user_shared"].exists() else []
+    user_t1_records = read_jsonl(paths["user_task1"]) if paths["user_task1"].exists() else []
     tasks = read_jsonl(paths["tasks"])
     arch_files = list(paths["archives"].glob("*.md")) if paths["archives"].exists() else []
-    print(f"• 满意范文归档: {len(arch_files)} 篇")
-    print(f"• 练习台账记录: {len(tasks)} 条")
+
+    print(f"\n【二、个人外脑资产 (实战确认与专属积累)】:")
+    total_user_items = len(user_morph_records) + len(user_t1_records)
+    if total_user_items == 0:
+        print("• 个人词句外脑总数: 0 条 (【100% 纯净白纸】已就绪，坐等实战表达沉淀)")
+    else:
+        print(f"• 个人词句外脑总数: {total_user_items} 条 (实战资产)")
+    print(f"  - 个人共享语素仓 (shared): {len(user_morph_records)} 条 (大小作文通用素材)")
+    print(f"  - 个人小作文专属仓 (task1): {len(user_t1_records)} 条 (功能句、结构与模板)")
+
+    mastery_counts = {"稳定": 0, "敢用": 0, "学习中": 0, "未接触": 0}
+    for r in user_morph_records + user_t1_records:
+        m = r.get("mastery", "未接触")
+        mastery_counts[m] = mastery_counts.get(m, 0) + 1
+    print(f"  - 个人掌握度分布: 稳定={mastery_counts['稳定']} | 敢用={mastery_counts['敢用']} | 学习中={mastery_counts['学习中']} | 未接触={mastery_counts['未接触']}")
+    print(f"  - 满意范文归档: {len(arch_files)} 篇 | 演练台账: {len(tasks)} 次")
+
+    # 3. 文类私有化与去系统化进展
+    print(f"\n【三、十大文类私有化进度 (去系统化看板)】:")
+    genre_labels = [
+        ("advice", "建议信"),
+        ("recommendation", "推荐信"),
+        ("complaint", "投诉信"),
+        ("apology", "道歉信"),
+        ("invitation", "邀请信"),
+        ("gratitude", "感谢信"),
+        ("application", "申请信"),
+        ("notice", "通知告示"),
+        ("minutes", "纪要备忘"),
+        ("reply_letter", "回复信")
+    ]
+    for g_code, g_name in genre_labels:
+        g_items = [it for it in user_t1_records if normalize_genre(it.get("genre")) == g_code]
+        cnt = len(g_items)
+        if cnt >= 5:
+            status_desc = f"【已自给自足】(外脑 {cnt} 条 >= 5，底座 0 借调，100% 个人化)"
+        elif cnt > 0:
+            status_desc = f"【借调过渡中】(外脑已有 {cnt} 条，不足配额由底座借调补齐)"
+        else:
+            status_desc = f"【纯净待演练】(外脑 0 条，写前由底座借调支持)"
+        print(f"  • [{g_name.ljust(4, '　')}]: {status_desc}")
 
     meta_file = paths["user_root"] / ".kb_meta.json"
     if meta_file.exists():
         try:
             with open(meta_file, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-                print(f"• 外脑初始化时间: {meta.get('initialized_at', '未知')}")
+                print(f"\n• 外脑初始化时间: {meta.get('initialized_at', '未知')}")
         except Exception:
             pass
-    print("======================================================================")
+def cmd_maimemo_sync(args):
+    """Sync essay vocabulary to MaiMemo (墨墨背单词)"""
+    try:
+        from maimemo_sync import sync_essay_vocabulary
+    except ImportError:
+        script_dir = Path(__file__).resolve().parent
+        if str(script_dir) not in sys.path:
+            sys.path.insert(0, str(script_dir))
+        from maimemo_sync import sync_essay_vocabulary
+
+    if getattr(args, "example", False):
+        example_payload = {
+            "chapter": "2011英二小作文",
+            "task_id": "T2011-E2-ADV",
+            "words": [
+                {
+                    "spelling": "accommodate",
+                    "type": "spelling_fix",
+                    "misspelling": "acommodate",
+                    "sentence": "The library is expected to prolong opening hours to accommodate students.",
+                    "translation": "图书馆预计将延长开放时间以方便/容纳学生。",
+                    "usage_note": "考研高频动词，常接 students / needs，表示‘迎合、容纳、迁就’，写作中可完美替换普通的 meet 或 help。",
+                    "grammar_note": "主干为 The library is expected to prolong opening hours；不定式短语 to accommodate students 作后置目的状语，有力承载举措价值。"
+                },
+                {
+                    "spelling": "prolong",
+                    "type": "advanced_vocab",
+                    "sentence": "The library is expected to prolong opening hours to accommodate students.",
+                    "translation": "图书馆预计将延长开放时间以方便/容纳学生。",
+                    "usage_note": "写作及阅读高频动词，及物动词常搭 opening hours / service，比 lengthen 或 extend 更加严谨书面。",
+                    "grammar_note": "在 be expected to 结构中充当动词不定式核心动词，形成动宾结构 prolong opening hours。"
+                }
+            ]
+        }
+        print(json.dumps(example_payload, indent=2, ensure_ascii=False))
+        return
+
+    if not args.file:
+        print("错误: 必须通过 --file 指定 JSON 载荷文件路径，或使用 --example 查看样例", file=sys.stderr)
+        sys.exit(1)
+
+    with open(args.file, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    try:
+        res = sync_essay_vocabulary(payload, token=args.token, mock=args.mock, dry_run=args.dry_run)
+        if getattr(args, "json", False):
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+        else:
+            print(f"=== 墨墨背单词同步完成 ===")
+            print(f"专属词本: {res.get('notepad_title')}")
+            print(f"章节: # {res.get('chapter')}")
+            print(f"同步生词: {', '.join(res.get('synced_words', []))}")
+            if res.get('skipped_words'):
+                print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
+            print(f"例句沉淀数: {res.get('phrases_created')}")
+            print(f"借壳助记数: {res.get('notes_created')}")
+            print(f"今日复习流: 已推入 (advance=True)")
+    except Exception as e:
+        err_msg = str(e)
+        if getattr(args, "json", False):
+            print(json.dumps({"status": "error", "message": err_msg}, ensure_ascii=False))
+        else:
+            print(f"同步失败: {err_msg}", file=sys.stderr)
+        sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description="Kaoyan Writing KB Manager")
@@ -2173,6 +2624,15 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     # verify
     subparsers.add_parser("verify", help="Verify syntax and integrity of JSONL databases")
 
+    # maimemo-sync
+    p_memo = subparsers.add_parser("maimemo-sync", help="Sync essay vocabulary to MaiMemo (墨墨背单词)")
+    p_memo.add_argument("--file", type=str, default=None, help="Path to JSON payload file")
+    p_memo.add_argument("--token", type=str, default=None, help="MaiMemo API token")
+    p_memo.add_argument("--dry-run", action="store_true", help="Dry run without modifying remote MaiMemo data")
+    p_memo.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
+    p_memo.add_argument("--example", action="store_true", help="Print payload template and exit")
+    p_memo.add_argument("--json", action="store_true", help="Output result as pure JSON")
+
     args = parser.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -2200,6 +2660,8 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
         cmd_check_essay(args)
     elif args.command == "verify":
         cmd_verify(args)
+    elif args.command == "maimemo-sync":
+        cmd_maimemo_sync(args)
 
 if __name__ == "__main__":
     main()

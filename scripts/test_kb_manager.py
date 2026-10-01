@@ -39,6 +39,8 @@ else:
     REPO_ROOT = SKILL_ROOT.parent
     KB_ROOT = REPO_ROOT / "knowledge_base"
 SCRIPT_PATH = SCRIPT_DIR / "kb_manager.py"
+sys.path.insert(0, str(SCRIPT_DIR))
+from kb_manager import is_id_match
 
 class TestKBManager(unittest.TestCase):
 
@@ -152,15 +154,26 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("[SKIP] 条目已存在，跳过防重", res_dup.stdout)
 
         # Clean up added item
-        task1_file = KB_ROOT / "user_brain" / "task1_expressions.jsonl"
-        with open(task1_file, "r", encoding="utf-8") as f:
-            records = [json.loads(l) for l in f if "optimize [system]" not in l]
-        with open(task1_file, "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
+            if t1_cand.exists():
+                with open(t1_cand, "r", encoding="utf-8") as f:
+                    records = [json.loads(l) for l in f if "optimize [system]" not in l]
+                with open(t1_cand, "w", encoding="utf-8") as f:
+                    for r in records:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     def test_06_batch_update_mastery_and_evidence(self):
         """C5, C6, C7: Test batch-update mastery transition evidence."""
+        # Ensure clean state in all task1 file candidates
+        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
+            if t1_cand.exists():
+                with open(t1_cand, "r", encoding="utf-8") as f:
+                    records = [json.loads(l) for l in f if l.strip()]
+                records = [r for r in records if not (is_id_match(r.get("id"), "T1_ADV_001") or is_id_match(r.get("id"), "T1_ADV_002"))]
+                with open(t1_cand, "w", encoding="utf-8") as f:
+                    for r in records:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
         # 1. Update with independent=true
         batch_payload = {
             "task_id": "T-TEST-002",
@@ -194,21 +207,14 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("未接触 ➔ 敢用", res_err.stdout)
 
         # Reset states back to clean
-        task1_file = KB_ROOT / "user_brain" / "task1_expressions.jsonl"
-        with open(task1_file, "r", encoding="utf-8") as f:
-            records = [json.loads(l) for l in f]
-        for r in records:
-            if r.get("id") in ("T1_ADV_001", "T1_ADV_002"):
-                r["mastery"] = "未接触"
-                r["mastery_note"] = ""
-                r["history"]["used_count"] = 0
-                r["history"]["independent_use_count"] = 0
-                r["history"]["error_use_count"] = 0
-                r["history"]["used_in_tasks"] = []
-                r["history"]["user_notes"] = ""
-        with open(task1_file, "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
+            if t1_cand.exists():
+                with open(t1_cand, "r", encoding="utf-8") as f:
+                    records = [json.loads(l) for l in f if l.strip()]
+                records = [r for r in records if not (is_id_match(r.get("id"), "T1_ADV_001") or is_id_match(r.get("id"), "T1_ADV_002"))]
+                with open(t1_cand, "w", encoding="utf-8") as f:
+                    for r in records:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     def test_07_archive_and_tasks_sync(self):
         """P1-1 & P2-5: Test 'archive' saves in task1/ and syncs with tasks.jsonl."""
@@ -353,7 +359,7 @@ class TestKBManager(unittest.TestCase):
         self.assertEqual(len(eng1_anchor["official_models"]), 2)
 
     def test_14_storage_detection_and_reset(self):
-        """Verify that KAOYAN_USER_BRAIN decodes to external directory and init --reset provisions clean factory seed."""
+        """Verify that KAOYAN_USER_BRAIN decodes to external directory and init --reset provisions clean slate (0 records)."""
         temp_dir = tempfile.mkdtemp(prefix="test_ub_")
         try:
             env = dict(self.env)
@@ -362,16 +368,22 @@ class TestKBManager(unittest.TestCase):
             env["KAOYAN_USER_BRAIN"] = temp_dir
             res = self.run_cmd(["init", "--reset"], env=env)
             self.assertEqual(res.returncode, 0, f"init --reset failed: {res.stderr}\n{res.stdout}")
-            self.assertIn("出厂纯净播种", res.stdout)
+            self.assertIn("纯净白纸初始化", res.stdout)
 
             ub_t1 = Path(temp_dir) / "user_brain" / "task1_expressions.jsonl"
             self.assertTrue(ub_t1.exists(), "task1_expressions.jsonl was not provisioned")
 
-            # Read and verify records
+            # Read and verify records: must be 0 records
             with open(ub_t1, "r", encoding="utf-8") as f:
                 lines = [json.loads(l) for l in f if l.strip()]
-            self.assertEqual(len(lines), 55)
-            self.assertTrue(all(item.get("mastery") == "未接触" for item in lines))
+            self.assertEqual(len(lines), 0, "User brain must be clean slate with 0 records upon init!")
+
+            # Check shared morphemes: also clean slate (0 records)
+            ub_sh = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
+            self.assertTrue(ub_sh.exists())
+            with open(ub_sh, "r", encoding="utf-8") as f:
+                sh_lines = [json.loads(l) for l in f if l.strip()]
+            self.assertEqual(len(sh_lines), 0)
 
             # Check other factory files
             tasks_file = Path(temp_dir) / "user_brain" / "tasks.jsonl"
@@ -572,6 +584,8 @@ class TestKBManager(unittest.TestCase):
 
     def test_22_admission_rules_tolerance(self):
         """Verify check_admission_rules tolerates '考纲核心' and phrase without explicit verb_phrase."""
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
         from kb_manager import check_admission_rules
 
         # 1. Tolerates synonymous exam_band
@@ -633,6 +647,227 @@ class TestKBManager(unittest.TestCase):
         res_full = self.run_cmd(["prompt", "--year", "2011", "--exam-type", "2", "--full"])
         self.assertNotEqual(res_full.returncode, 0)
         self.assertIn("unrecognized arguments: --full", res_full.stderr + res_full.stdout)
+
+    def test_24_dual_warehouse_morpheme_routing_and_sync(self):
+        """Verify dual-warehouse architecture: shared morphemes routed to shared/ and sentences to task1/."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_dual_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            res_init = self.run_cmd(["init", "--reset"], env=env)
+            self.assertEqual(res_init.returncode, 0)
+
+            shared_file = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
+            task1_file = Path(temp_dir) / "user_brain" / "task1" / "expressions.jsonl"
+            task2_file = Path(temp_dir) / "user_brain" / "task2" / "expressions.jsonl"
+            self.assertTrue(shared_file.exists(), "shared/morphemes.jsonl missing")
+            self.assertTrue(task1_file.exists(), "task1/expressions.jsonl missing")
+            self.assertTrue(task2_file.exists(), "task2/expressions.jsonl missing")
+
+            # 1. Batch update with a morpheme
+            batch_morph = {
+                "task_id": "T2011-E2-ADV",
+                "new_items": [
+                    {
+                        "data": {
+                            "type": "morpheme",
+                            "text": "navigate one's career path",
+                            "meaning": "规划职业发展道路",
+                            "source": "2011真题实战",
+                            "mastery": "学习中"
+                        }
+                    }
+                ]
+            }
+            res_bm = self.run_cmd(["batch-update", "--data", json.dumps(batch_morph, ensure_ascii=False)], env=env)
+            self.assertEqual(res_bm.returncode, 0)
+            self.assertIn("追加至 shared", res_bm.stdout)
+
+            with open(shared_file, "r", encoding="utf-8") as f:
+                shared_lines = [json.loads(l) for l in f if l.strip()]
+            self.assertTrue(any("navigate one's career path" in (it.get("text") or "") for it in shared_lines))
+
+            # 2. Batch update with a functional sentence
+            batch_sen = {
+                "task_id": "T2011-E2-ADV",
+                "new_items": [
+                    {
+                        "data": {
+                            "category": "functional_sentence",
+                            "genre": "advice",
+                            "expression": "If I were you, I would [action].",
+                            "intent": "虚拟语气提建议",
+                            "source": "2011真题实战",
+                            "slots": {"[action]": "建议动作"}
+                        }
+                    }
+                ]
+            }
+            res_bs = self.run_cmd(["batch-update", "--data", json.dumps(batch_sen, ensure_ascii=False)], env=env)
+            self.assertEqual(res_bs.returncode, 0)
+            self.assertIn("追加至 task1", res_bs.stdout)
+
+            with open(task1_file, "r", encoding="utf-8") as f:
+                t1_lines = [json.loads(l) for l in f if l.strip()]
+            self.assertTrue(any("If I were you, I would [action]." in (it.get("expression") or it.get("text") or "") for it in t1_lines))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_25_slim_schema_and_zero_emojis(self):
+        """Verify query output conforms to zero emojis rule and 3-column format."""
+        res_q = self.run_cmd(["query", "--genre", "advice", "--limit", "5"])
+        self.assertEqual(res_q.returncode, 0)
+        out = res_q.stdout
+
+        # Check zero emojis in query output
+        emojis = [c for c in out if ord(c) > 0x1F000 or (0x2600 <= ord(c) <= 0x27BF and ord(c) != 0x2794)]
+        self.assertEqual(len(emojis), 0, f"Found emojis in query output: {emojis}")
+
+        # Check 3 columns
+        self.assertIn("【一、本题可用已掌握】", out)
+        self.assertIn("【二、本题建议新学】", out)
+        self.assertIn("【三、本题建议结构/模板】", out)
+
+        # Check zero emojis in status
+        res_s = self.run_cmd(["status"])
+        self.assertEqual(res_s.returncode, 0)
+        s_out = res_s.stdout
+        s_emojis = [c for c in s_out if ord(c) > 0x1F000 or (0x2600 <= ord(c) <= 0x27BF and ord(c) != 0x2794)]
+        self.assertEqual(len(s_emojis), 0, f"Found emojis in status output: {s_emojis}")
+
+    def test_26_two_tier_query_borrowing_on_clean_brain(self):
+        """Verify that on a clean slate (0 user items), query borrows from system seeds and tags with [系统借调]."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_borrow_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            self.run_cmd(["init", "--reset"], env=env)
+
+            # Query advice
+            res = self.run_cmd(["query", "--genre", "advice", "--limit", "4"], env=env)
+            self.assertEqual(res.returncode, 0, f"query failed: {res.stderr}\n{res.stdout}")
+            self.assertIn("[系统借调]", res.stdout, "Clean user brain must borrow from seeds with [系统借调] tag")
+            self.assertIn("宁缺毋滥", res.stdout)
+
+            # JSON mode
+            res_json = self.run_cmd(["query", "--genre", "advice", "--limit", "4", "--json"], env=env)
+            self.assertEqual(res_json.returncode, 0)
+            items = json.loads(res_json.stdout)
+            self.assertTrue(len(items) > 0)
+            self.assertTrue(all(it.get("is_borrowed") is True for it in items))
+            self.assertTrue(all(it.get("source_tier") == "system_seeds" for it in items))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_27_two_tier_query_user_brain_precedence(self):
+        """Verify that user brain assets take 100% precedence, leaving zero system借调 when stock is sufficient."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_prec_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            self.run_cmd(["init", "--reset"], env=env)
+
+            # Seed user brain with 3 user items
+            user_items = [
+                {
+                    "category": "functional_sentence",
+                    "genre": "advice",
+                    "section": "opening",
+                    "intent": "用户首段自主建议表达",
+                    "expression": "I am pleased to put forward some suggestions for [target].",
+                    "slots": {"[target]": "建议目标"},
+                    "source": "真题实战",
+                    "mastery": "稳定"
+                },
+                {
+                    "category": "functional_sentence",
+                    "genre": "advice",
+                    "section": "body",
+                    "intent": "用户次段举措表达",
+                    "expression": "It is highly recommended that you should [action].",
+                    "slots": {"[action]": "具体动作"},
+                    "source": "真题实战",
+                    "mastery": "敢用"
+                },
+                {
+                    "category": "template",
+                    "genre": "advice",
+                    "section": "body",
+                    "intent": "用户专属建议信模板",
+                    "blocks": ["Dear Sir,", "Body paragraph", "Yours sincerely"],
+                    "source": "真题实战",
+                    "mastery": "稳定"
+                }
+            ]
+            for it in user_items:
+                res_add = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(it, ensure_ascii=False)], env=env)
+                self.assertEqual(res_add.returncode, 0)
+                self.assertIn("[ADDED]", res_add.stdout)
+
+            # Query with limit 3: should be fulfilled 100% by user brain
+            res_q = self.run_cmd(["query", "--genre", "advice", "--limit", "3"], env=env)
+            self.assertEqual(res_q.returncode, 0)
+            self.assertNotIn("[系统借调]", res_q.stdout, "Sufficient user brain items must not trigger system borrowing")
+
+            res_json = self.run_cmd(["query", "--genre", "advice", "--limit", "3", "--json"], env=env)
+            self.assertEqual(res_json.returncode, 0)
+            items = json.loads(res_json.stdout)
+            self.assertEqual(len(items), 3)
+            self.assertTrue(all(it.get("is_borrowed") is False for it in items))
+            self.assertTrue(all(it.get("source_tier") == "user_brain" for it in items))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_28_progressive_privatization_lifecycle(self):
+        """Verify the full lifecycle: clean slate -> borrowed from seed -> practiced & promoted -> user brain precedence."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ub_life_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            self.run_cmd(["init", "--reset"], env=env)
+
+            # 1. Initially clean slate
+            res_st1 = self.run_cmd(["status"], env=env)
+            self.assertIn("100% 纯净白纸", res_st1.stdout)
+
+            # 2. Query borrows T1_ADV_SEN_001 from system
+            res_q1 = self.run_cmd(["query", "--genre", "advice", "--limit", "3"], env=env)
+            self.assertIn("[系统借调]", res_q1.stdout)
+
+            # 3. User practices and batch updates to promote
+            update_payload = {
+                "task_id": "T2011-E2-ADV",
+                "status_updates": [
+                    {
+                        "id": "T1_ADV_001",
+                        "status": "敢用",
+                        "independent": True,
+                        "note": "实战用对，提升入库"
+                    }
+                ]
+            }
+            res_upd = self.run_cmd(["batch-update", "--data", json.dumps(update_payload, ensure_ascii=False)], env=env)
+            self.assertEqual(res_upd.returncode, 0)
+            self.assertIn("未接触 ➔ 稳定", res_upd.stdout)
+
+            # 4. Status reflects 1 promoted item
+            res_st2 = self.run_cmd(["status"], env=env)
+            self.assertIn("个人词句外脑总数: 1 条", res_st2.stdout)
+
+            # 5. Querying with limit 1 now returns user's promoted asset without borrowing tag
+            res_q2 = self.run_cmd(["query", "--genre", "advice", "--limit", "1"], env=env)
+            self.assertNotIn("[系统借调]", res_q2.stdout)
+            self.assertIn("T1_ADV_SEN_001", res_q2.stdout)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 if __name__ == "__main__":
     unittest.main()
