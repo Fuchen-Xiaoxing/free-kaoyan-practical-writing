@@ -24,7 +24,6 @@ import argparse
 import datetime
 import re
 from pathlib import Path
-import shutil
 
 # Force UTF-8 stdout/stderr on Windows
 if sys.platform.startswith("win"):
