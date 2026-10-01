@@ -18,6 +18,8 @@ import os
 import sys
 import io
 import json
+import hashlib
+import datetime
 import subprocess
 import shutil
 import contextlib
@@ -412,8 +414,9 @@ class TestKBManager(unittest.TestCase):
             self.assertEqual(res.returncode, 0, f"init --reset failed: {res.stderr}\n{res.stdout}")
             self.assertIn("纯净白纸初始化", res.stdout)
 
-            ub_t1 = Path(temp_dir) / "user_brain" / "task1_expressions.jsonl"
-            self.assertTrue(ub_t1.exists(), "task1_expressions.jsonl was not provisioned")
+            # v2 双仓规范布局（唯一权威表示）
+            ub_t1 = Path(temp_dir) / "user_brain" / "task1" / "expressions.jsonl"
+            self.assertTrue(ub_t1.exists(), "task1/expressions.jsonl was not provisioned")
 
             # Read and verify records: must be 0 records
             with open(ub_t1, "r", encoding="utf-8") as f:
@@ -427,10 +430,18 @@ class TestKBManager(unittest.TestCase):
                 sh_lines = [json.loads(l) for l in f if l.strip()]
             self.assertEqual(len(sh_lines), 0)
 
-            # Check other factory files
-            tasks_file = Path(temp_dir) / "user_brain" / "tasks.jsonl"
+            # Check ledger: task1/tasks.jsonl (v2)
+            tasks_file = Path(temp_dir) / "user_brain" / "task1" / "tasks.jsonl"
             self.assertTrue(tasks_file.exists())
             self.assertEqual(tasks_file.stat().st_size, 0)
+
+            # 扁平遗留文件与 task2 均不得再被创建（本 skill 只有小作文 task1）
+            self.assertFalse((Path(temp_dir) / "user_brain" / "task1_expressions.jsonl").exists(),
+                             "legacy flat task1_expressions.jsonl must not be provisioned")
+            self.assertFalse((Path(temp_dir) / "user_brain" / "tasks.jsonl").exists(),
+                             "legacy flat tasks.jsonl must not be provisioned")
+            self.assertFalse((Path(temp_dir) / "user_brain" / "task2").exists(),
+                             "task2 must not be provisioned")
 
             hist_file = Path(temp_dir) / "user_brain" / "history.log"
             self.assertTrue(hist_file.exists())
@@ -442,7 +453,7 @@ class TestKBManager(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_15_write_isolation_and_promotion(self):
-        """Verify that updating a shared morpheme in decoupled mode does NOT alter the base shared file, and promotes to user task1."""
+        """Verify that promoting a shared morpheme does NOT alter the base seed, and lands in the personal shared warehouse."""
         temp_dir = tempfile.mkdtemp(prefix="test_ub_iso_")
         try:
             env = dict(self.env)
@@ -451,25 +462,28 @@ class TestKBManager(unittest.TestCase):
             env["KAOYAN_USER_BRAIN"] = temp_dir
             self.run_cmd(["init", "--reset"], env=env)
 
-            # Base shared file
-            base_shared = Path(__file__).resolve().parent.parent / "knowledge_base" / "shared" / "scenario_morphemes.jsonl"
+            # 出厂底座：paths["shared"] 指向 seeds/shared_morphemes.seed.jsonl（只读）
+            kb_root = Path(__file__).resolve().parent.parent / "knowledge_base"
+            base_shared = kb_root / "seeds" / "shared_morphemes.seed.jsonl"
             mtime_before = base_shared.stat().st_mtime
+            hash_before = hashlib.sha256(base_shared.read_bytes()).hexdigest()
 
-            # Update status of a morpheme from shared (e.g. M_LIB_001)
+            # Update status of a morpheme from the built-in base (e.g. M_LIB_001)
             res = self.run_cmd(["update-status", "--id", "M_LIB_001", "--status", "敢用", "--note", "首次学习"], env=env)
             self.assertEqual(res.returncode, 0, f"update-status failed: {res.stderr}\n{res.stdout}")
-            self.assertIn("已同步保存至用户外脑", res.stdout)
+            self.assertIn("已沉淀至个人共享仓", res.stdout)
 
-            # Verify base shared file was not touched
-            mtime_after = base_shared.stat().st_mtime
-            self.assertEqual(mtime_before, mtime_after, "Base shared file was mutated!")
+            # Verify base seed file was not touched (neither mtime nor bytes)
+            self.assertEqual(mtime_before, base_shared.stat().st_mtime, "Base seed file was mutated!")
+            self.assertEqual(hash_before, hashlib.sha256(base_shared.read_bytes()).hexdigest(),
+                             "Base seed file content changed!")
 
-            # Verify it was added to user's task1_expressions.jsonl
-            ub_t1 = Path(temp_dir) / "user_brain" / "task1_expressions.jsonl"
-            with open(ub_t1, "r", encoding="utf-8") as f:
+            # 借调转正必须落到个人共享语素仓，而不是小作文专属仓
+            ub_sh = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
+            with open(ub_sh, "r", encoding="utf-8") as f:
                 user_items = [json.loads(l) for l in f if l.strip()]
             promoted = next((it for it in user_items if it.get("id") == "M_LIB_001"), None)
-            self.assertIsNotNone(promoted, "M_LIB_001 was not promoted into user task1")
+            self.assertIsNotNone(promoted, "M_LIB_001 was not promoted into the personal shared warehouse")
             self.assertEqual(promoted.get("mastery"), "敢用")
 
             # Query and ensure user's promoted version is returned without duplicates
@@ -701,10 +715,10 @@ class TestKBManager(unittest.TestCase):
 
             shared_file = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
             task1_file = Path(temp_dir) / "user_brain" / "task1" / "expressions.jsonl"
-            task2_file = Path(temp_dir) / "user_brain" / "task2" / "expressions.jsonl"
             self.assertTrue(shared_file.exists(), "shared/morphemes.jsonl missing")
             self.assertTrue(task1_file.exists(), "task1/expressions.jsonl missing")
-            self.assertTrue(task2_file.exists(), "task2/expressions.jsonl missing")
+            self.assertFalse((Path(temp_dir) / "user_brain" / "task2").exists(),
+                             "task2 must not exist: this skill only covers Section A (task1)")
 
             # 1. Batch update with a morpheme
             batch_morph = {
@@ -1252,6 +1266,311 @@ class TestKBManager(unittest.TestCase):
                     os.remove(payload_file)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+    # =====================================================================
+    # Regression tests for the audit remediation (P0 data safety / P1 correctness)
+    # =====================================================================
+
+    BUILTIN_GLOBS = (
+        "anchors/*.jsonl",
+        "seeds/*.jsonl",
+    )
+
+    def builtin_fingerprint(self):
+        """SHA256 of every read-only built-in asset; must never change."""
+        fp = {}
+        for pattern in self.BUILTIN_GLOBS:
+            for f in sorted(KB_ROOT.glob(pattern)):
+                fp[str(f.relative_to(KB_ROOT))] = hashlib.sha256(f.read_bytes()).hexdigest()
+        return fp
+
+    def test_36_builtin_base_is_read_only_under_every_write_path(self):
+        """P0-1: no command may ever write user data into the shipped anchors/seeds."""
+        import types
+        sys.path.insert(0, str(SCRIPT_DIR))
+        import kb_manager
+
+        temp_dir = tempfile.mkdtemp(prefix="test_builtin_ro_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            before = self.builtin_fingerprint()
+            self.assertTrue(before, "builtin fingerprint is empty; test is vacuous")
+
+            # (a) write_store must refuse the built-in shared store outright
+            paths = kb_manager.get_paths()
+            with self.assertRaises(PermissionError):
+                kb_manager.write_store(paths, "shared", [])
+            with self.assertRaises(PermissionError):
+                kb_manager.write_store(paths, "seed_shared", [])
+            with self.assertRaises(PermissionError):
+                kb_manager.write_store(paths, "seed_task1", [])
+
+            # (b) promoting a built-in shared seed must land in the personal store
+            r1 = self.run_cmd(["update-status", "--id", "M_LIB_001", "--status", "敢用"], env=env)
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            self.assertIn("已沉淀至个人共享仓", r1.stdout)
+
+            # (c) new morphemes routed to shared must land in the personal store
+            batch = {"task_id": "T-RO", "new_items": [{
+                "target": "shared",
+                "data": {"type": "morpheme", "text": "curb seat hoarding",
+                         "meaning": "遏制占座", "source": "回归测试", "mastery": "学习中"},
+            }]}
+            r2 = self.run_cmd(["batch-update", "--data", json.dumps(batch, ensure_ascii=False)], env=env)
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+
+            # (d) cleanup --apply must not touch the base either
+            r3 = self.run_cmd(["cleanup", "--apply"], env=env)
+            self.assertEqual(r3.returncode, 0, r3.stderr)
+
+            after = self.builtin_fingerprint()
+            self.assertEqual(before, after, "read-only built-in assets were mutated by a write path!")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            os.environ.pop("KB_BUILTIN_ROOT", None)
+            os.environ.pop("KAOYAN_USER_BRAIN", None)
+
+    def test_37_archive_overwrite_is_restorable_on_rollback(self):
+        """P0-2: a pre-existing archive with the SAME filename must be restored byte-exactly."""
+        import types
+        sys.path.insert(0, str(SCRIPT_DIR))
+        import kb_manager
+
+        temp_dir = tempfile.mkdtemp(prefix="test_arch_rb_")
+        saved_env = dict(os.environ)
+        original_archive = kb_manager.cmd_archive
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            os.environ["KB_BUILTIN_ROOT"] = env["KB_BUILTIN_ROOT"]
+            os.environ["KAOYAN_USER_BRAIN"] = env["KAOYAN_USER_BRAIN"]
+            os.environ.pop("KB_ROOT", None)
+
+            paths = kb_manager.get_paths()
+            arch_dir = Path(paths["archives"])
+            arch_dir.mkdir(parents=True, exist_ok=True)
+
+            # Predict the exact filename the archiver will target (date + task + title)
+            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            title = "Rollback Overwrite Probe"
+            title_safe = kb_manager.re.sub(r'[\\/*?:"<>| \t\n]', "_", title)[:40]
+            existing = arch_dir / f"{date_str}_2012_complaint_{title_safe}.md"
+            existing.write_text("ORIGINAL ARCHIVE CONTENT THAT MUST SURVIVE", encoding="utf-8")
+
+            payload = {
+                "task_id": "T-RB2",
+                "title": title,
+                "genre": "complaint",
+                "year": "2012",
+                "exam_type": "2",
+                "essay_content": "Dear Sir or Madam,\n\n    Body.\n\nYours faithfully,\nZhang Wei\n",
+            }
+            payload_file = Path(temp_dir) / "settle_rb2.json"
+            payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            # Force a LOCAL failure after the archive step by rejecting the verify gate
+            original_verify = kb_manager.verify_integrity
+            kb_manager.verify_integrity = lambda paths, verbose=True: (True, 0)
+
+            args = types.SimpleNamespace(
+                file=str(payload_file), data=None, token=None, mock=True,
+                dry_run=False, json=False, example=False,
+            )
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    with self.assertRaises(SystemExit) as ctx:
+                        kb_manager.cmd_settle(args)
+                self.assertEqual(ctx.exception.code, 1)
+            finally:
+                kb_manager.verify_integrity = original_verify
+
+            self.assertTrue(existing.exists(), "overwritten archive was deleted instead of restored")
+            self.assertEqual(
+                existing.read_text(encoding="utf-8"),
+                "ORIGINAL ARCHIVE CONTENT THAT MUST SURVIVE",
+                "pre-existing archive content was lost on rollback",
+            )
+            # And the new archive must not have been left behind
+            self.assertEqual(len(list(Path(temp_dir).rglob("*.md"))), 1)
+        finally:
+            kb_manager.cmd_archive = original_archive
+            os.environ.clear()
+            os.environ.update(saved_env)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_38_settle_promotion_is_never_a_silent_noop(self):
+        """P0-3: a reported promotion must actually be persisted (no counted-but-unwritten update)."""
+        temp_dir = tempfile.mkdtemp(prefix="test_nonoop_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            user_shared = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
+            before = user_shared.read_text(encoding="utf-8")
+
+            # Promote a built-in shared seed id via settle's own batch section
+            payload = {
+                "task_id": "T-NONOOP",
+                "genre": "advice",
+                "year": "2011",
+                "exam_type": "2",
+                "essay_content": "Dear Li Ming,\n\n    Body.\n\nBest wishes,\nZhang Wei\n",
+                "batch": {"status_updates": [
+                    {"id": "M_LIB_001", "status": "敢用", "note": "回归：晋级必须落盘", "independent": True}
+                ]},
+            }
+            payload_file = Path(temp_dir) / "settle_noop.json"
+            payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            res = self.run_cmd(["settle", "--file", str(payload_file), "--mock"], env=env)
+            self.assertEqual(res.returncode, 0, f"{res.stderr}\n{res.stdout}")
+
+            after = user_shared.read_text(encoding="utf-8")
+            self.assertNotEqual(before, after, "reported promotion wrote nothing (silent no-op)")
+            records = [json.loads(l) for l in after.splitlines() if l.strip()]
+            promoted = next((r for r in records if r.get("id") == "M_LIB_001"), None)
+            self.assertIsNotNone(promoted, "promoted seed record missing from the personal shared warehouse")
+            # independent=True 时脚本内建规则会把提议的"敢用"晋级为"稳定"（必须真实落盘）
+            self.assertEqual(promoted.get("mastery"), "稳定")
+            self.assertEqual(promoted.get("version"), 2, "version must be incremented on promotion")
+            self.assertIn("history", promoted, "promoted record must carry a history block")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_39_read_commands_never_create_a_brain(self):
+        """P1-5: read-only commands must not create the user brain on disk (PC stays clean)."""
+        temp_dir = tempfile.mkdtemp(prefix="test_ro_probe_")
+        try:
+            target = Path(temp_dir) / "not_yet_created" / "写作外脑"
+            self.assertFalse(target.exists())
+
+            env = dict(os.environ)
+            env.pop("KB_ROOT", None)
+            env["KB_BUILTIN_ROOT"] = str(KB_ROOT)
+            env["KAOYAN_USER_BRAIN"] = str(target)
+
+            read_cmds = [
+                ["status"],
+                ["prompt", "--year", "2012", "--exam-type", "2"],
+                ["anchor", "--genre", "advice", "--limit", "1"],
+                ["query", "--genre", "advice", "--limit", "3"],
+                ["cleanup"],
+            ]
+            for cmd in read_cmds:
+                res = self.run_cmd(cmd, env=env)
+                self.assertEqual(res.returncode, 0, f"{cmd} failed: {res.stderr}")
+                self.assertFalse(target.exists(), f"read command {cmd} created the user brain at {target}")
+
+            # verify legitimately reports a missing brain, but must still not create it
+            res_v = self.run_cmd(["verify"], env=env)
+            self.assertFalse(target.exists(), "verify created the user brain")
+            self.assertIn("个人外脑尚未初始化", res_v.stdout + res_v.stderr)
+
+            # ...while an explicit write command IS allowed to initialise (env = explicit opt-in)
+            res_w = self.run_cmd(["init", "--reset"], env=env)
+            self.assertEqual(res.returncode, 0, res_w.stderr)
+            self.assertTrue((target / "user_brain" / "task1" / "expressions.jsonl").exists())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            os.environ.pop("KB_BUILTIN_ROOT", None)
+            os.environ.pop("KAOYAN_USER_BRAIN", None)
+
+    def test_40_anchor_limit_returns_newest_real_exam(self):
+        """P1-1: --limit 1 must return the newest real-exam anchor, not the first in file order."""
+        res = self.run_cmd(["anchor", "--genre", "advice", "--limit", "1"])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("2024 English II", res.stdout, f"expected newest advice anchor, got:\n{res.stdout}")
+        self.assertNotIn("2021 English I", res.stdout)
+
+        res2 = self.run_cmd(["anchor", "--genre", "reply_letter", "--limit", "1"])
+        self.assertEqual(res2.returncode, 0, res2.stderr)
+        self.assertIn("2025 English I", res2.stdout, f"expected newest reply_letter anchor, got:\n{res2.stdout}")
+
+    def test_41_ambiguous_year_refuses_signature_verdict(self):
+        """P1-3: --year without --exam-type must refuse to judge the signature, not guess a paper."""
+        essay = ("Dear Sir or Madam,\n\n    I am writing to lodge a complaint.\n\n"
+                 "Yours faithfully,\nLi Ming\n")
+        ambiguous = self.run_cmd(["check-essay", "--text", essay, "--year", "2011"])
+        self.assertEqual(ambiguous.returncode, 0, ambiguous.stderr)
+        self.assertIn("已跳过署名核验", ambiguous.stdout)
+        # 署名一行必须只给"未校验"，不得给出 PASS/FAIL 结论
+        sig_lines = [l for l in ambiguous.stdout.splitlines() if "署名核验:" in l]
+        self.assertEqual(len(sig_lines), 1, ambiguous.stdout)
+        self.assertIn("未校验", sig_lines[0])
+        self.assertNotIn("[FAIL]", sig_lines[0])
+        self.assertNotIn("[PASS]", sig_lines[0])
+
+        pinned = self.run_cmd(["check-essay", "--text", essay, "--year", "2012", "--exam-type", "2"])
+        self.assertEqual(pinned.returncode, 0, pinned.stderr)
+        self.assertIn("题干法定 'Zhang Wei'", pinned.stdout)
+        self.assertIn("[FAIL]", pinned.stdout)
+
+    def test_42_user_shared_schema_is_verified_like_task1(self):
+        """P1-4: a corrupt personal shared warehouse must fail verify (parity with task1)."""
+        import types
+        sys.path.insert(0, str(SCRIPT_DIR))
+        import kb_manager
+
+        temp_dir = tempfile.mkdtemp(prefix="test_verify_parity_")
+        saved_env = dict(os.environ)
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            os.environ["KB_BUILTIN_ROOT"] = env["KB_BUILTIN_ROOT"]
+            os.environ["KAOYAN_USER_BRAIN"] = env["KAOYAN_USER_BRAIN"]
+            os.environ.pop("KB_ROOT", None)
+
+            user_shared = Path(temp_dir) / "user_brain" / "shared" / "morphemes.jsonl"
+            bad = {"id": "M_LIB_001", "category": "not_a_category", "mastery": "随便",
+                   "status": "weird", "verb_phrase": "x"}  # missing source + illegal enums
+            user_shared.write_text(json.dumps(bad, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+                has_error, _total = kb_manager.verify_integrity(kb_manager.get_paths(), verbose=True)
+            report = buf.getvalue()
+            self.assertTrue(has_error, "verify must fail on an invalid user_shared record")
+            self.assertIn("非法 category", report)
+            self.assertIn("非法 mastery", report)
+            self.assertIn("非法 status", report)
+            self.assertIn("缺少必填字段: source", report)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_env)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_43_legacy_flat_layout_is_still_readable(self):
+        """P3: historical flat files must remain readable (no data loss on upgrade), but not written."""
+        temp_dir = tempfile.mkdtemp(prefix="test_legacy_")
+        try:
+            env = self.isolated_env(temp_dir)
+            ub = Path(temp_dir) / "user_brain"
+            ub.mkdir(parents=True, exist_ok=True)
+
+            legacy_rec = {
+                "id": "T1_ADV_SEN_900", "category": "functional_sentence", "genre": "advice",
+                "section": "opening", "expression": "I am writing to [action].",
+                "intent": "存量扁平布局兼容", "source": "legacy", "mastery": "敢用",
+            }
+            (ub / "task1_expressions.jsonl").write_text(
+                json.dumps(legacy_rec, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            res = self.run_cmd(["query", "--mine", "--json"], env=env)
+            self.assertEqual(res.returncode, 0, f"{res.stderr}\n{res.stdout}")
+            payload = json.loads(res.stdout)
+            ids = [it["id"] for grp in ("hits", "same_genre", "cross_genre") for it in payload.get(grp, [])]
+            self.assertIn("T1_ADV_SEN_900", ids, "legacy flat records must still be recalled by query --mine")
+
+            # A write must go to the v2 path only, never resurrect the legacy file
+            legacy_before = (ub / "task1_expressions.jsonl").read_text(encoding="utf-8")
+            (ub / "task1").mkdir(parents=True, exist_ok=True)
+            (ub / "task1" / "expressions.jsonl").write_text("", encoding="utf-8")
+            res_w = self.run_cmd(["update-status", "--id", "T1_ADV_SEN_900", "--status", "稳定"], env=env)
+            self.assertEqual(res_w.returncode, 0, res_w.stderr)
+            self.assertEqual((ub / "task1_expressions.jsonl").read_text(encoding="utf-8"), legacy_before,
+                             "legacy flat file must not be rewritten")
+            v2_records = [json.loads(l) for l in (ub / "task1" / "expressions.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertTrue(any(r.get("id") == "T1_ADV_SEN_900" and r.get("mastery") == "稳定" for r in v2_records),
+                            "update must be persisted into the v2 warehouse")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
