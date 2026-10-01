@@ -1,2 +1,1 @@
-{"ts": "2026-09-29 00:00:00", "op": "init", "id": "SYS_INIT", "before": null, "after": "出厂纯净写作外脑种子就绪", "reason": "初始化考研小作文出厂种子库", "task_id": ""}
-{"ts": "2026-09-30 23:54:46", "op": "purify", "id": "SYS_PURIFY", "before": "shared:0, task1:55", "after": "shared:0, task1:0", "reason": "彻底剥离教研底座种子，净化个人外脑（剔除 55 条出厂僵尸条目，保留 0 条实战确认条目）", "task_id": ""}
+{"ts": "2026-09-29 00:00:00", "op": "init", "id": "SYS_INIT", "before": null, "after": "出厂纯净写作外脑白纸就绪（0 条实战资产）", "reason": "初始化考研小作文出厂白纸外脑骨架", "task_id": ""}

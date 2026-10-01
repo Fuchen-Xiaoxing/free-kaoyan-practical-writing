@@ -80,11 +80,17 @@ def find_word_highlight_ranges(sentence: str, spelling: str) -> list:
     return []
 
 
-def update_notepad_content(existing_content: str, chapter_name: str, new_words: list) -> str:
+def plan_notepad_update(existing_content: str, chapter_name: str, new_words: list) -> tuple:
     """
-    Update notepad content with chapter and words.
-    Avoids duplicate chapters or duplicate words within the same chapter.
-    Preserves all existing notepad content and chapters.
+    Compute the new notepad content AND which words are genuinely new.
+
+    Returns (new_content, added_words).
+
+    added_words is the ONLY reliable cross-run idempotency signal available through
+    the documented endpoints: a word already present in the target chapter has been
+    synced by an earlier run, so its example phrase and mnemonic note must NOT be
+    recreated (POST /phrases and POST /notes both create new objects and would
+    duplicate the user's cards).
     """
     clean_chapter = chapter_name.strip().lstrip("#").strip()
     chapter_header = f"# {clean_chapter}"
@@ -93,7 +99,7 @@ def update_notepad_content(existing_content: str, chapter_name: str, new_words: 
     if not existing_content or not existing_content.strip():
         # Brand new notepad content
         lines = [chapter_header] + words_to_add
-        return "\n".join(lines).strip()
+        return "\n".join(lines).strip(), list(words_to_add)
 
     content = existing_content.strip()
     lines = content.split("\n")
@@ -109,7 +115,7 @@ def update_notepad_content(existing_content: str, chapter_name: str, new_words: 
     if chapter_idx == -1:
         # Chapter does not exist: append to bottom
         add_lines = ["", chapter_header] + words_to_add
-        return (content + "\n" + "\n".join(add_lines)).strip()
+        return (content + "\n" + "\n".join(add_lines)).strip(), list(words_to_add)
 
     # Chapter exists: find end of current chapter (next '#' or end of content)
     next_chapter_idx = len(lines)
@@ -128,11 +134,22 @@ def update_notepad_content(existing_content: str, chapter_name: str, new_words: 
     # Add only non-duplicate words
     filtered_new = [w for w in words_to_add if w.lower() not in existing_in_chapter]
     if not filtered_new:
-        return content  # Nothing new to add
+        return content, []  # Nothing new to add
 
     # Insert new words before next chapter or at end
     lines = lines[:next_chapter_idx] + filtered_new + lines[next_chapter_idx:]
-    return "\n".join(lines).strip()
+    return "\n".join(lines).strip(), list(filtered_new)
+
+
+def update_notepad_content(existing_content: str, chapter_name: str, new_words: list) -> str:
+    """
+    Update notepad content with chapter and words.
+
+    Avoids duplicate chapters or duplicate words within the same chapter.
+    Preserves all existing notepad content and chapters.
+    """
+    content, _added = plan_notepad_update(existing_content, chapter_name, new_words)
+    return content
 
 
 def format_mnemonic_note(word_data: dict) -> str:
@@ -329,7 +346,7 @@ class MaimemoClient:
 
         if not target_np:
             # Create new notepad
-            content = update_notepad_content("", chapter, words)
+            content, added = plan_notepad_update("", chapter, words)
             create_body = {
                 "notepad": {
                     "title": title,
@@ -341,14 +358,14 @@ class MaimemoClient:
             }
             res = self.request("POST", "/notepads", create_body)
             res_data = self._unwrap_data(res)
-            return {"action": "created", "notepad": res_data.get("notepad", res_data)}
+            return {"action": "created", "notepad": res_data.get("notepad", res_data), "added_words": added}
         else:
             # Update existing notepad
             np_id = target_np["id"]
             detail = self.request("GET", f"/notepads/{np_id}")
             detail_data = self._unwrap_data(detail)
             existing_content = detail_data.get("notepad", {}).get("content", "") or detail_data.get("content", "")
-            updated_content = update_notepad_content(existing_content, chapter, words)
+            updated_content, added = plan_notepad_update(existing_content, chapter, words)
             update_body = {
                 "notepad": {
                     "title": target_np.get("title", title),
@@ -360,7 +377,7 @@ class MaimemoClient:
             }
             res = self.request("POST", f"/notepads/{np_id}", update_body)
             res_data = self._unwrap_data(res)
-            return {"action": "updated", "notepad": res_data.get("notepad", res_data)}
+            return {"action": "updated", "notepad": res_data.get("notepad", res_data), "added_words": added}
 
     def create_example_phrase(self, voc_id: str, sentence: str, translation: str, chapter: str, spelling: str) -> dict:
         """Create custom example phrase with target word highlighted (no highlight when absent)."""
@@ -448,13 +465,26 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     valid_spellings = [w["spelling"] for w in matched_words]
     np_res = client.sync_notepad(DEFAULT_NOTEPAD_TITLE, chapter, valid_spellings)
 
+    # 跨次幂等：already-synced 单词的例句与助记不得重复创建。
+    # POST /phrases 与 POST /notes 每次调用都会新建对象，重试会污染学生账号；
+    # 词本章节中"已存在该词"是唯一可用的已同步凭证（仅用文档化端点实现）。
+    added_raw = (np_res or {}).get("added_words")
+    already_synced = []
+    if added_raw is None:
+        # 无法获得幂等信息时保守处理：全部按本次新建（保持既有行为，不静默跳过）
+        to_create = list(matched_words)
+    else:
+        added_lower = {str(s).strip().lower() for s in added_raw}
+        to_create = [w for w in matched_words if w["spelling"].strip().lower() in added_lower]
+        already_synced = [w["spelling"] for w in matched_words if w["spelling"].strip().lower() not in added_lower]
+
     # 3. Create example phrases & 4. Create mnemonic notes
     phrase_count = 0
     note_count = 0
     phrase_failures = []
     note_failures = []
     highlight_missing = []
-    for w in matched_words:
+    for w in to_create:
         vid = w["voc_id"]
         spelling = w["spelling"]
         sentence = w.get("sentence", "")
@@ -478,12 +508,13 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         except Exception as e:
             note_failures.append(f"{spelling}: {e}")
 
-    # 5. Push words to study plan and immediate review
-    vids = [w["voc_id"] for w in matched_words]
+    # 5. Push newly synced words to study plan and immediate review.
+    #    只推本次新建的词：此前已同步过的词早已在复习流中，重复推入无意义。
+    vids = [w["voc_id"] for w in to_create]
     study_res = client.add_to_today_review(vids, advance=True)
 
     # 6. 部分失败显式化：绝不把"0 条例句"包装成 success
-    expected_phrases = len([w for w in matched_words if w.get("sentence")])
+    expected_phrases = len([w for w in to_create if w.get("sentence")])
     status = "success"
     message = ""
     if phrase_failures and phrase_count == 0 and expected_phrases > 0:
@@ -493,6 +524,8 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         message = (f"部分例句/助记创建失败：例句失败 {len(phrase_failures)} 条，"
                    f"助记失败 {len(note_failures)} 条")
         status = "partial_failed"
+    if already_synced and status == "success":
+        message = f"其中 {len(already_synced)} 词此前已同步，本次仅补建缺失卡片（幂等跳过）"
 
     return {
         "status": status,
@@ -500,7 +533,8 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         "notepad_title": DEFAULT_NOTEPAD_TITLE,
         "chapter": chapter,
         "notepad_action": (np_res or {}).get("action"),
-        "synced_words": [w["spelling"] for w in matched_words],
+        "synced_words": [w["spelling"] for w in to_create],
+        "already_synced_words": already_synced,
         "skipped_words": skipped_words,
         "phrases_created": phrase_count,
         "phrases_failed": len(phrase_failures),
@@ -509,7 +543,13 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         "highlight_missing": highlight_missing,
         "failure_details": (phrase_failures + note_failures)[:5],
         "study_advance": True,
-        "added_count": study_res.get("added_count", len(vids))
+        "added_count": study_res.get("added_count", len(vids)),
+        # 远端副作用的显式声明：partial_failed 时本地已发出的远端写入不可撤销
+        "remote_side_effects": {
+            "notepad_updated": bool((np_res or {}).get("action")),
+            "review_pushed": bool(vids),
+            "idempotent_retry": True,
+        },
     }
 
 

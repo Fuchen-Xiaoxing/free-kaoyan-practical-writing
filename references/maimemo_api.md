@@ -21,7 +21,9 @@
   - 返回 `status="success"` 才算真正同步成功；
   - 单词全部未匹配、或例句创建全部失败、或存在例句/助记创建失败 → `status="partial_failed"`，并在 `message` / `failure_details` 中给出原因，命令以**非零退出码**终止；
   - 载荷内重复 `spelling` 自动去重；同一章节内已存在的单词不重复写入词本；
-  - 目标词未出现在例句原句中时，**不生成高亮区间**（不回落高亮句首），该词记入 `highlight_missing` 供私教复核例句质量。
+  - **跨次幂等**：以"该词是否已存在于目标章节"为已同步凭证。重复同步同一章节时，已存在的词记为 `already_synced_words`，**不重复创建例句与助记**（`POST /phrases` 与 `POST /notes` 每次调用都会新建对象，否则会在学生账号里堆出重复词卡）；仅补建缺失卡片，且只把本次新建的词推入复习流；
+  - 目标词未出现在例句原句中时，**不生成高亮区间**（不回落高亮句首），该词记入 `highlight_missing` 供私教复核例句质量；
+  - `remote_side_effects` 字段显式声明本次已发生的远端写入（词本更新 / 复习流推送），提醒"远端写入不可撤销"。
 
 ---
 
@@ -91,7 +93,7 @@
       "tags": ["考研"],
       "origin": "2011英二小作文实战",
       "highlight": [
-        {"start": 51, "end": 62}
+        {"start": 52, "end": 63}
       ]
     }
   }
@@ -143,9 +145,11 @@
 
 ---
 
-## 三、结算数据载荷契约 (`/tmp/maimemo_sync.json`)
+## 三、结算数据载荷契约（`settle` 载荷内的 `maimemo` 段）
 
-私教在阶段 3 用户确认同步后，输出如下规范 JSON 文件并执行同步脚本：
+> **常规业务只走 `settle`**：阶段 3 用户确认后，把 `maimemo` 段写进 `/tmp/settle.json`，由 `kb_manager.py settle --file /tmp/settle.json` 原子化提交，**严禁零散碎片化调用**。
+>
+> 下文的独立载荷形态**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `/tmp/maimemo_sync.json` 并执行 `kb_manager.py maimemo-sync --file /tmp/maimemo_sync.json`。该独立入口已被幂等化，重复执行不会产生重复词卡。
 
 ```json
 {

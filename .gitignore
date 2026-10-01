@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Python bytecode / build artifacts
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---------------------------------------------------------------------------
+# Operating system / editor files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---------------------------------------------------------------------------
+# Runtime user-brain OUTPUT (never ship locally generated study data)
+#
+# The authoritative user brain lives on the user's own device
+# (/var/minis/mounts/Documents/考研英语/写作外脑). What is committed under
+# knowledge_base/user_brain/ is only the empty white-slate scaffold
+# (0-byte JSONL + .gitkeep); anything generated at runtime is ignored here.
+# ---------------------------------------------------------------------------
+knowledge_base/user_brain/sessions/
+knowledge_base/user_brain/satisfaction_archives/task1/*.md
+!knowledge_base/user_brain/satisfaction_archives/task1/.gitkeep
+
+# Desktop-tier archive location used when the brain resolves under ~/Documents
+满意范文/
+
+# Runtime lock file
+settle.lock
+
+# ---------------------------------------------------------------------------
+# Temporary / local scratch
+# ---------------------------------------------------------------------------
+*.tmp
+*.bak
+tmp/
+.perm_test

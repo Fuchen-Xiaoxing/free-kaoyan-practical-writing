@@ -19,11 +19,101 @@ if str(SCRIPT_DIR) not in sys.path:
 from maimemo_sync import (
     find_word_highlight_ranges,
     update_notepad_content,
+    plan_notepad_update,
     format_mnemonic_note,
     MaimemoClient,
     sync_essay_vocabulary,
     DEFAULT_NOTEPAD_TITLE
 )
+
+
+class TestCrossRunIdempotency(unittest.TestCase):
+    """P1-7: retrying a sync for the same chapter must not duplicate cards.
+
+    POST /phrases and POST /notes always create new objects, so a naive retry
+    pollutes the student's MaiMemo account with duplicate cards. The chapter
+    content is the only cross-run ledger available through documented endpoints.
+    """
+
+    def test_plan_notepad_update_reports_added_words(self):
+        # Brand new notepad -> everything is new
+        content, added = plan_notepad_update("", "2011英二小作文", ["accommodate", "prolong"])
+        self.assertEqual(added, ["accommodate", "prolong"])
+        self.assertIn("# 2011英二小作文", content)
+
+        # Same chapter again -> nothing is new
+        content2, added2 = plan_notepad_update(content, "2011英二小作文", ["accommodate", "prolong"])
+        self.assertEqual(added2, [], "already-present words must not be reported as new")
+        self.assertEqual(content2, content)
+
+        # Partially new -> only the missing one is reported
+        _c3, added3 = plan_notepad_update(content, "2011英二小作文", ["accommodate", "refund"])
+        self.assertEqual(added3, ["refund"])
+
+    def test_second_sync_creates_no_duplicate_phrase_or_note(self):
+        import maimemo_sync as ms
+
+        state = {"content": "", "phrases": [], "notes": [], "review_ids": []}
+
+        def fake_request(self, method, path, body=None):
+            if path == "/vocabulary/query":
+                spells = (body or {}).get("spellings", [])
+                return {"success": True, "errors": [],
+                        "data": {"voc": [{"id": f"voc_{w}", "spelling": w} for w in spells]}}
+            if path.startswith("/notepads?") and method == "GET":
+                return {"success": True, "errors": [], "data": {"notepads": [
+                    {"id": "np1", "title": ms.DEFAULT_NOTEPAD_TITLE, "brief": "", "tags": ["考研"],
+                     "status": "PUBLISHED"}]}}
+            if path == "/notepads/np1" and method == "GET":
+                return {"success": True, "errors": [],
+                        "data": {"notepad": {"id": "np1", "content": state["content"]}}}
+            if path == "/notepads/np1" and method == "POST":
+                state["content"] = body["notepad"]["content"]
+                return {"success": True, "errors": [], "data": {"id": "np1", "notepad": body["notepad"]}}
+            if path == "/phrases":
+                state["phrases"].append(body["phrase"]["phrase"])
+                return {"success": True, "errors": [], "data": {"id": "ph1"}}
+            if path == "/notes":
+                state["notes"].append(body["note"]["note"])
+                return {"success": True, "errors": [], "data": {"id": "nt1"}}
+            if path == "/study/add_words":
+                state["review_ids"] += [w["id"] for w in (body or {}).get("words", [])]
+                return {"success": True, "errors": [], "data": {"added_count": len((body or {}).get("words", []))}}
+            return {"success": True, "errors": [], "data": {}}
+
+        payload = {
+            "chapter": "2011英二小作文",
+            "task_id": "T2011-E2-ADV",
+            "words": [{
+                "spelling": "accommodate",
+                "type": "spelling_fix",
+                "misspelling": "acommodate",
+                "sentence": "The library is expected to accommodate students.",
+                "translation": "图书馆预计将容纳学生。",
+                "usage_note": "高频动词",
+                "grammar_note": "不定式作目的状语",
+            }],
+        }
+
+        original = ms.MaimemoClient.request
+        ms.MaimemoClient.request = fake_request
+        try:
+            first = ms.sync_essay_vocabulary(payload, token="dummy")
+            self.assertEqual(first["status"], "success")
+            self.assertEqual(len(state["phrases"]), 1)
+            self.assertEqual(len(state["notes"]), 1)
+            self.assertEqual(len(state["review_ids"]), 1)
+
+            second = ms.sync_essay_vocabulary(payload, token="dummy")
+            self.assertEqual(second["status"], "success")
+            self.assertEqual(len(state["phrases"]), 1, "retry duplicated the example phrase")
+            self.assertEqual(len(state["notes"]), 1, "retry duplicated the mnemonic note")
+            self.assertEqual(len(state["review_ids"]), 1, "retry re-pushed an already-synced word")
+            self.assertEqual(second["already_synced_words"], ["accommodate"])
+            self.assertEqual(second["synced_words"], [])
+            self.assertTrue(second["remote_side_effects"]["idempotent_retry"])
+        finally:
+            ms.MaimemoClient.request = original
 
 
 class TestHighlightCalculation(unittest.TestCase):

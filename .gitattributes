@@ -1,0 +1,20 @@
+# Normalize line endings explicitly so git never rewrites data files.
+#
+# Without this, core.autocrlf causes repeated LF->CRLF churn on the JSONL data
+# files and on the markdown/scripts, inflating diffs and risking corrupt
+# byte-offset expectations in the anchors/seed corpora.
+
+* text=auto eol=lf
+
+# JSONL corpora are data: byte-exact, never line-ending-translated.
+*.jsonl -text
+*.json  -text
+
+# Binary assets
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
