@@ -53,10 +53,10 @@ class TestHighlightCalculation(unittest.TestCase):
         self.assertEqual(sentence[start:end].lower(), "accommodating")
 
     def test_fallback_unmatched(self):
+        """目标词不在例句中时必须返回空列表，绝不回落高亮句首。"""
         sentence = "This is a simple sentence."
         ranges = find_word_highlight_ranges(sentence, "prolong")
-        self.assertEqual(len(ranges), 1)
-        self.assertEqual(ranges[0]["start"], 0)
+        self.assertEqual(ranges, [])
 
 
 class TestNotepadContentUpdate(unittest.TestCase):
@@ -166,6 +166,73 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         finally:
             if old_token is not None:
                 os.environ["MAIMEMO_TOKEN"] = old_token
+
+    def test_duplicate_spellings_are_deduped(self):
+        """同一 spelling 重复出现时只同步一次，避免重复建例句/助记。"""
+        payload = {
+            "chapter": "2012英二小作文",
+            "words": [
+                {"spelling": "express", "sentence": "I am writing to express my dissatisfaction."},
+                {"spelling": "Express", "sentence": "I am writing to express my dissatisfaction."},
+            ],
+        }
+        res = sync_essay_vocabulary(payload, mock=True)
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["synced_words"], ["express"])
+        self.assertEqual(res["phrases_created"], 1)
+
+    def test_phrase_failures_surface_as_partial_failed(self):
+        """P2-3: 例句创建全部失败时不得再返回 success（杜绝静默假成功）。"""
+        payload = {
+            "chapter": "2012英二小作文",
+            "words": [
+                {"spelling": "express", "sentence": "I am writing to express my dissatisfaction."},
+                {"spelling": "lodge", "sentence": "I am writing to lodge a complaint."},
+            ],
+        }
+        original = MaimemoClient.create_example_phrase
+
+        def _boom(self, *a, **kw):
+            raise RuntimeError("phrases endpoint rejected the payload")
+
+        MaimemoClient.create_example_phrase = _boom
+        try:
+            res = sync_essay_vocabulary(payload, mock=True)
+        finally:
+            MaimemoClient.create_example_phrase = original
+
+        self.assertEqual(res["status"], "partial_failed")
+        self.assertEqual(res["phrases_created"], 0)
+        self.assertEqual(res["phrases_failed"], 2)
+        self.assertIn("例句创建全部失败", res["message"])
+
+    def test_highlight_missing_is_reported(self):
+        """目标词不在例句中时记录 highlight_missing，便于私教复核例句质量。"""
+        payload = {
+            "chapter": "2012英二小作文",
+            "words": [
+                {"spelling": "prolong", "sentence": "This sentence does not contain the target."},
+            ],
+        }
+        res = sync_essay_vocabulary(payload, mock=True)
+        self.assertEqual(res["status"], "success")
+        self.assertIn("prolong", res["highlight_missing"])
+
+
+class TestDataUnwrapping(unittest.TestCase):
+    def test_unwrap_data_nested(self):
+        resp = {"success": True, "data": {"voc": [{"id": "1", "spelling": "test"}]}, "errors": []}
+        unwrapped = MaimemoClient._unwrap_data(resp)
+        self.assertEqual(unwrapped, {"voc": [{"id": "1", "spelling": "test"}]})
+
+    def test_unwrap_data_flat(self):
+        resp = {"voc": [{"id": "1", "spelling": "test"}]}
+        unwrapped = MaimemoClient._unwrap_data(resp)
+        self.assertEqual(unwrapped, {"voc": [{"id": "1", "spelling": "test"}]})
+
+    def test_unwrap_data_non_dict(self):
+        self.assertEqual(MaimemoClient._unwrap_data([]), [])
+        self.assertEqual(MaimemoClient._unwrap_data(None), None)
 
 
 class TestKBManagerIntegration(unittest.TestCase):

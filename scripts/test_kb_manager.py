@@ -16,9 +16,11 @@ Covers:
 import unittest
 import os
 import sys
+import io
 import json
 import subprocess
 import shutil
+import contextlib
 import tempfile
 from pathlib import Path
 
@@ -60,6 +62,23 @@ class TestKBManager(unittest.TestCase):
         )
         return res
 
+    def isolated_env(self, temp_dir):
+        """写入型用例专用：教研底座保持只读（KB_BUILTIN_ROOT），个人外脑落到临时目录。
+
+        这样测试永远不会污染仓库自带的 knowledge_base/user_brain。
+        """
+        env = dict(os.environ)
+        env.pop("KB_ROOT", None)
+        env["KB_BUILTIN_ROOT"] = str(KB_ROOT)
+        env["KAOYAN_USER_BRAIN"] = str(temp_dir)
+        return env
+
+    def init_isolated_brain(self, temp_dir):
+        env = self.isolated_env(temp_dir)
+        res = self.run_cmd(["init", "--reset"], env=env)
+        self.assertEqual(res.returncode, 0, f"init failed: {res.stderr}")
+        return env
+
     def test_01_verify_passes_on_clean_db(self):
         """Test 'verify' command outputs pass for all DBs."""
         res = self.run_cmd(["verify"])
@@ -70,23 +89,34 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("验证通过！", res.stdout)
 
     def test_02_verify_fails_on_corrupt_json(self):
-        """E1: Test 'verify' reports FAIL when a corrupted JSON line exists."""
-        task1_file = KB_ROOT / "user_brain" / "task1_expressions.jsonl"
-        with open(task1_file, "r", encoding="utf-8") as f:
-            original_content = f.read()
-
+        """E1: Test 'verify' reports FAIL when a corrupted JSON line exists (on a temp KB copy)."""
+        temp_root = tempfile.mkdtemp(prefix="test_corrupt_")
         try:
+            kb_copy = Path(temp_root) / "knowledge_base"
+            shutil.copytree(KB_ROOT, kb_copy)
+            env = dict(os.environ)
+            env["KB_ROOT"] = str(kb_copy)
+
+            task1_file = kb_copy / "user_brain" / "task1_expressions.jsonl"
+            task1_file.parent.mkdir(parents=True, exist_ok=True)
+            if not task1_file.exists():
+                task1_file.write_text("", encoding="utf-8")
+
             # Append corrupt line
             with open(task1_file, "a", encoding="utf-8") as f:
                 f.write("\n{this is broken json line}\n")
 
-            res = self.run_cmd(["verify"])
+            res = self.run_cmd(["verify"], env=env)
             self.assertNotEqual(res.returncode, 0, "verify must fail on corrupted JSON lines")
             self.assertIn("JSON格式解析错误", res.stderr + res.stdout)
             self.assertIn("[FAIL] 知识库验证失败", res.stderr + res.stdout)
+
+            # 仓库自带底座绝不能被本用例改动
+            repo_file = KB_ROOT / "user_brain" / "task1_expressions.jsonl"
+            if repo_file.exists():
+                self.assertNotIn("broken json line", repo_file.read_text(encoding="utf-8"))
         finally:
-            with open(task1_file, "w", encoding="utf-8") as f:
-                f.write(original_content)
+            shutil.rmtree(temp_root, ignore_errors=True)
 
     def test_03_anchor_brief_omits_model_and_full_includes_it(self):
         """E3: Test 'anchor' brief mode does NOT output official model; --full does."""
@@ -122,130 +152,141 @@ class TestKBManager(unittest.TestCase):
         self.assertIn("邀请信", out)
 
     def test_05_append_admission_rules_and_deduplication(self):
-        """P1-5: Test append admission gates and deduplication."""
-        # 1. Non-reusable item (no slots or templates) should be rejected
-        bad_item = {
-            "category": "functional_sentence",
-            "genre": "advice",
-            "intent": "一次性具体事实描述",
-            "expression": "Yesterday Li Ming met Zhang Wei at room 204.",
-            "source": "测试来源"
-        }
-        res_bad = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(bad_item, ensure_ascii=False)])
-        self.assertIn("[REJECT]", res_bad.stdout)
+        """P1-5: Test append admission gates and deduplication (isolated user brain)."""
+        temp_dir = tempfile.mkdtemp(prefix="test_append_iso_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
 
-        # 2. Valid reusable item
-        good_item = {
-            "category": "functional_sentence",
-            "genre": "advice",
-            "intent": "提出数字化资源优化建议",
-            "expression": "It would be of great service for [entity] to optimize [system], thereby [benefit].",
-            "slots": {"[entity]": "机构", "[system]": "系统", "[benefit]": "效益"},
-            "source": "名师语料库",
-            "exam_band": "大纲内"
-        }
-        res_good = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(good_item, ensure_ascii=False)])
-        self.assertEqual(res_good.returncode, 0)
-        self.assertIn("[ADDED]", res_good.stdout)
+            # 1. Non-reusable item (no slots or templates) should be rejected
+            bad_item = {
+                "category": "functional_sentence",
+                "genre": "advice",
+                "intent": "一次性具体事实描述",
+                "expression": "Yesterday Li Ming met Zhang Wei at room 204.",
+                "source": "测试来源"
+            }
+            res_bad = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(bad_item, ensure_ascii=False)], env=env)
+            self.assertIn("[REJECT]", res_bad.stdout)
 
-        # 3. Deduplication: appending again should skip
-        res_dup = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(good_item, ensure_ascii=False)])
-        self.assertEqual(res_dup.returncode, 0)
-        self.assertIn("[SKIP] 条目已存在，跳过防重", res_dup.stdout)
+            # 2. Valid reusable item
+            good_item = {
+                "category": "functional_sentence",
+                "genre": "advice",
+                "intent": "提出数字化资源优化建议",
+                "expression": "It would be of great service for [entity] to optimize [system], thereby [benefit].",
+                "slots": {"[entity]": "机构", "[system]": "系统", "[benefit]": "效益"},
+                "source": "名师语料库",
+                "exam_band": "大纲内"
+            }
+            res_good = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(good_item, ensure_ascii=False)], env=env)
+            self.assertEqual(res_good.returncode, 0)
+            self.assertIn("[ADDED]", res_good.stdout)
 
-        # Clean up added item
-        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
-            if t1_cand.exists():
-                with open(t1_cand, "r", encoding="utf-8") as f:
-                    records = [json.loads(l) for l in f if "optimize [system]" not in l]
-                with open(t1_cand, "w", encoding="utf-8") as f:
-                    for r in records:
-                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            # 3. Deduplication: appending again should skip
+            res_dup = self.run_cmd(["append", "--target", "task1", "--data", json.dumps(good_item, ensure_ascii=False)], env=env)
+            self.assertEqual(res_dup.returncode, 0)
+            self.assertIn("[SKIP] 条目已存在，跳过防重", res_dup.stdout)
+
+            # 写入必须落在临时外脑内，而不是仓库自带的 knowledge_base
+            written = list(Path(temp_dir).rglob("expressions.jsonl"))
+            self.assertTrue(any("optimize [system]" in f.read_text(encoding="utf-8") for f in written),
+                            f"appended item not found in isolated brain: {written}")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_06_batch_update_mastery_and_evidence(self):
-        """C5, C6, C7: Test batch-update mastery transition evidence."""
-        # Ensure clean state in all task1 file candidates
-        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
-            if t1_cand.exists():
-                with open(t1_cand, "r", encoding="utf-8") as f:
-                    records = [json.loads(l) for l in f if l.strip()]
-                records = [r for r in records if not (is_id_match(r.get("id"), "T1_ADV_001") or is_id_match(r.get("id"), "T1_ADV_002"))]
-                with open(t1_cand, "w", encoding="utf-8") as f:
-                    for r in records:
-                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        """C5, C6, C7: Test batch-update mastery transition evidence (isolated user brain)."""
+        temp_dir = tempfile.mkdtemp(prefix="test_batch_iso_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
 
-        # 1. Update with independent=true
-        batch_payload = {
-            "task_id": "T-TEST-002",
-            "status_updates": [
-                {
-                    "id": "T1_ADV_001",
-                    "status": "稳定",
-                    "independent": True,
-                    "note": "跨题新题目独立用对"
-                }
-            ]
-        }
-        res = self.run_cmd(["batch-update", "--data", json.dumps(batch_payload, ensure_ascii=False)])
-        self.assertEqual(res.returncode, 0, f"batch-update failed: {res.stderr}")
-        self.assertIn("未接触 ➔ 稳定", res.stdout)
+            # 1. Update with independent=true
+            batch_payload = {
+                "task_id": "T-TEST-002",
+                "status_updates": [
+                    {
+                        "id": "T1_ADV_001",
+                        "status": "稳定",
+                        "independent": True,
+                        "note": "跨题新题目独立用对"
+                    }
+                ]
+            }
+            res = self.run_cmd(["batch-update", "--data", json.dumps(batch_payload, ensure_ascii=False)], env=env)
+            self.assertEqual(res.returncode, 0, f"batch-update failed: {res.stderr}")
+            self.assertIn("未接触 ➔ 稳定", res.stdout)
 
-        # 2. Update with error note -> 敢用 (需注意)
-        batch_error = {
-            "task_id": "T-TEST-003",
-            "status_updates": [
-                {
-                    "id": "T1_ADV_002",
-                    "status": "敢用",
-                    "error": True,
-                    "note": "主动尝试但有搭配瑕疵"
-                }
-            ]
-        }
-        res_err = self.run_cmd(["batch-update", "--data", json.dumps(batch_error, ensure_ascii=False)])
-        self.assertEqual(res_err.returncode, 0)
-        self.assertIn("未接触 ➔ 敢用", res_err.stdout)
+            # 2. Update with error note -> 敢用 (需注意)
+            batch_error = {
+                "task_id": "T-TEST-003",
+                "status_updates": [
+                    {
+                        "id": "T1_ADV_002",
+                        "status": "敢用",
+                        "error": True,
+                        "note": "主动尝试但有搭配瑕疵"
+                    }
+                ]
+            }
+            res_err = self.run_cmd(["batch-update", "--data", json.dumps(batch_error, ensure_ascii=False)], env=env)
+            self.assertEqual(res_err.returncode, 0)
+            self.assertIn("未接触 ➔ 敢用", res_err.stdout)
 
-        # Reset states back to clean
-        for t1_cand in [KB_ROOT / "user_brain" / "task1_expressions.jsonl", KB_ROOT / "user_brain" / "task1" / "expressions.jsonl"]:
-            if t1_cand.exists():
-                with open(t1_cand, "r", encoding="utf-8") as f:
-                    records = [json.loads(l) for l in f if l.strip()]
-                records = [r for r in records if not (is_id_match(r.get("id"), "T1_ADV_001") or is_id_match(r.get("id"), "T1_ADV_002"))]
-                with open(t1_cand, "w", encoding="utf-8") as f:
-                    for r in records:
-                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            # 3. 未命中的 ID 必须被显式报告（不再静默无操作）
+            batch_miss = {
+                "task_id": "T-TEST-004",
+                "status_updates": [{"id": "T1_NOT_EXIST_999", "status": "稳定"}]
+            }
+            res_miss = self.run_cmd(["batch-update", "--data", json.dumps(batch_miss, ensure_ascii=False)], env=env)
+            self.assertEqual(res_miss.returncode, 0)
+            self.assertIn("[MISS]", res_miss.stdout)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_07_archive_and_tasks_sync(self):
-        """P1-1 & P2-5: Test 'archive' saves in task1/ and syncs with tasks.jsonl."""
-        task_id = "T-TEST-ARCH-001"
-        res = self.run_cmd([
-            "archive",
-            "--title", "Test Archive Essay",
-            "--genre", "advice",
-            "--year", "2024",
-            "--task-id", task_id,
-            "--content", "Dear Sir or Madam,\n\n    Test content.\n\nYours sincerely,\nLi Ming",
-            "--metadata", json.dumps({"absorbed_items": ["[T1_ADV_001] Test item"]}, ensure_ascii=False)
-        ])
-        self.assertEqual(res.returncode, 0, f"archive failed: {res.stderr}")
-        self.assertIn("[OK] 范文已成功归档至", res.stdout)
-        self.assertIn("[OK] 题目台账已同步至", res.stdout)
+        """P1-1 & P2-5: Test 'archive' saves a model essay and syncs the task ledger exactly once."""
+        temp_dir = tempfile.mkdtemp(prefix="test_archive_iso_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            task_id = "T-TEST-ARCH-001"
+            res = self.run_cmd([
+                "archive",
+                "--title", "Test Archive Essay",
+                "--genre", "advice",
+                "--year", "2024",
+                "--task-id", task_id,
+                "--content", "Dear Sir or Madam,\n\n    Test content.\n\nYours sincerely,\nLi Ming",
+                "--metadata", json.dumps({"absorbed_items": ["[T1_ADV_001] Test item"]}, ensure_ascii=False)
+            ], env=env)
+            self.assertEqual(res.returncode, 0, f"archive failed: {res.stderr}")
+            self.assertIn("[OK] 范文已成功归档至", res.stdout)
+            self.assertIn("[OK] 题目台账已同步至", res.stdout)
 
-        # Verify file exists in task1/
-        arch_dir = KB_ROOT / "user_brain" / "satisfaction_archives" / "task1"
-        matching = list(arch_dir.glob("*_Test_Archive_Essay.md"))
-        self.assertGreaterEqual(len(matching), 1)
+            matching = list(Path(temp_dir).rglob("*_Test_Archive_Essay.md"))
+            self.assertGreaterEqual(len(matching), 1, f"archive md not found under {temp_dir}")
 
-        # Clean up archive file and tasks.jsonl entry
-        for f in matching:
-            f.unlink()
-        tasks_file = KB_ROOT / "user_brain" / "tasks.jsonl"
-        if tasks_file.exists():
-            with open(tasks_file, "r", encoding="utf-8") as f:
-                t_lines = [l for l in f if task_id not in l]
-            with open(tasks_file, "w", encoding="utf-8") as f:
-                f.writelines(t_lines)
+            # 台账必须只有一行（paths["tasks"] 与 user_task1_tasks 指向同一文件时不得重复写入）
+            ledger_rows = []
+            for ledger in Path(temp_dir).rglob("tasks.jsonl"):
+                ledger_rows += [l for l in ledger.read_text(encoding="utf-8").splitlines() if task_id in l]
+            self.assertEqual(len(ledger_rows), 1, f"ledger duplicated: {ledger_rows}")
+
+            # 重复归档同一 task_id 必须 upsert，而不是继续堆行
+            res2 = self.run_cmd([
+                "archive",
+                "--title", "Test Archive Essay",
+                "--genre", "advice",
+                "--year", "2024",
+                "--task-id", task_id,
+                "--content", "Dear Sir or Madam,\n\n    Test content v2.\n\nYours sincerely,\nLi Ming",
+            ], env=env)
+            self.assertEqual(res2.returncode, 0, f"re-archive failed: {res2.stderr}")
+            ledger_rows2 = []
+            for ledger in Path(temp_dir).rglob("tasks.jsonl"):
+                ledger_rows2 += [l for l in ledger.read_text(encoding="utf-8").splitlines() if task_id in l]
+            self.assertEqual(len(ledger_rows2), 1, f"ledger not idempotent: {ledger_rows2}")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_08_cleanup_command(self):
         """Test 'cleanup' command runs evaluation."""
@@ -268,8 +309,9 @@ class TestKBManager(unittest.TestCase):
     def test_10_check_essay_command(self):
         """Test 'check-essay' CLI diagnoses word count, ratio, contractions, exclamation, and format."""
         # 1. Clean essay
+        # 注意：收件人刻意使用 Wang Ming，避免触发"收件人与署名重名"红线（署名统一为 Li Ming）
         clean_essay = (
-            "Dear Li Ming,\n\n"
+            "Dear Wang Ming,\n\n"
             "    Hearing that you have been admitted to a university, I am writing to extend my congratulations "
             "and offer some suggestions for your transition to campus life.\n"
             "    In daily life, it is crucial to cultivate self-reliance, as you will live without your parents' care. "
@@ -552,11 +594,13 @@ class TestKBManager(unittest.TestCase):
             "                                        Yours sincerely,\n"
             "                                        Zhang Wei\n"
         )
+        temp_dir = tempfile.mkdtemp(prefix="test_archwc_iso_")
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".md") as tf:
             tf.write(test_essay)
             temp_path = tf.name
 
         try:
+            env = self.init_isolated_brain(temp_dir)
             res_arch = self.run_cmd([
                 "archive",
                 "--title", "Test Auto Word Count",
@@ -564,23 +608,19 @@ class TestKBManager(unittest.TestCase):
                 "--year", "2011",
                 "--task-id", "TEST-AUTO-WC",
                 "--file", temp_path
-            ])
+            ], env=env)
             self.assertEqual(res_arch.returncode, 0, f"archive failed: {res_arch.stderr}\n{res_arch.stdout}")
             self.assertIn("[OK] 范文已成功归档至:", res_arch.stdout)
 
             # Find generated archive file and inspect word count header
-            archives_dir = KB_ROOT / "user_brain" / "satisfaction_archives" / "task1"
-            arch_files = list(archives_dir.glob("*_Test_Auto_Word_Count.md"))
-            self.assertGreater(len(arch_files), 0)
-            with open(arch_files[0], "r", encoding="utf-8") as af:
-                arch_text = af.read()
+            arch_files = list(Path(temp_dir).rglob("*_Test_Auto_Word_Count.md"))
+            self.assertGreater(len(arch_files), 0, f"archive md not found under {temp_dir}")
+            arch_text = arch_files[0].read_text(encoding="utf-8")
             self.assertIn("- **字数统计**：109 词", arch_text)
-
-            # Cleanup test archive file
-            arch_files[0].unlink()
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_22_admission_rules_tolerance(self):
         """Verify check_admission_rules tolerates '考纲核心' and phrase without explicit verb_phrase."""
@@ -866,6 +906,350 @@ class TestKBManager(unittest.TestCase):
             res_q2 = self.run_cmd(["query", "--genre", "advice", "--limit", "1"], env=env)
             self.assertNotIn("[系统借调]", res_q2.stdout)
             self.assertIn("T1_ADV_SEN_001", res_q2.stdout)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_29_settle_documented_payload_archives_and_ledger_once(self):
+        """P0-1/P0-2: SKILL.md 文档化载荷（顶层 essay_content）必须真实归档，且台账只写一行。"""
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_doc_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            payload = {
+                "task_id": "T2012-E2-DOC",
+                "title": "投诉网购电子词典（2012英二）",
+                "genre": "complaint",
+                "year": "2012",
+                "exam_type": "2",
+                "essay_content": (
+                    "Dear Sir or Madam,\n\n    I am writing to lodge a formal complaint regarding the electronic dictionary.\n\n"
+                    "                                        Yours faithfully,\n                                        Zhang Wei\n"
+                ),
+                "batch": {"status_updates": [], "new_items": []},
+            }
+            payload_file = Path(temp_dir) / "settle_doc.json"
+            payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            res = self.run_cmd(["settle", "--file", str(payload_file), "--mock"], env=env)
+            self.assertEqual(res.returncode, 0, f"settle failed: {res.stderr}\n{res.stdout}")
+            self.assertIn("范文归档与题目台账登记完成", res.stdout)
+
+            md_files = list(Path(temp_dir).rglob("*_complaint_*.md"))
+            self.assertEqual(len(md_files), 1, f"expected exactly 1 archive, got {md_files}")
+
+            ledger_rows = []
+            for ledger in Path(temp_dir).rglob("tasks.jsonl"):
+                ledger_rows += [l for l in ledger.read_text(encoding="utf-8").splitlines() if "T2012-E2-DOC" in l]
+            self.assertEqual(len(ledger_rows), 1, f"ledger must contain exactly one row: {ledger_rows}")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_30_settle_preflight_failures_are_nonzero_and_zero_write(self):
+        """P0-1/P2-1: 缺正文 / 墨墨词卡缺 spelling / 晋级 ID 不存在，均须非零退出且零写入。"""
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_pf_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            base = {
+                "task_id": "T-PF",
+                "title": "前置校验",
+                "genre": "complaint",
+                "year": "2012",
+                "exam_type": "2",
+                "essay_content": "Dear Sir or Madam,\n\n    Body.\n\nYours faithfully,\nZhang Wei\n",
+            }
+
+            cases = []
+            no_content = dict(base)
+            no_content.pop("essay_content")
+            cases.append(("no content", no_content))
+            bad_word = dict(base, maimemo={"chapter": "2012英二小作文", "words": [{"sentence": "x"}]})
+            cases.append(("word without spelling", bad_word))
+            bad_id = dict(base, batch={"status_updates": [{"id": "T1_NOT_EXIST_999", "status": "稳定"}]})
+            cases.append(("unmatched status id", bad_id))
+
+            for label, payload in cases:
+                payload_file = Path(temp_dir) / f"case_{label.replace(' ', '_')}.json"
+                payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                res = self.run_cmd(["settle", "--file", str(payload_file), "--mock"], env=env)
+                self.assertNotEqual(res.returncode, 0, f"[{label}] settle must fail, got 0\n{res.stdout}")
+                self.assertIn("前置校验未通过", res.stderr + res.stdout, f"[{label}] missing preflight failure message")
+
+            self.assertEqual(len(list(Path(temp_dir).rglob("*.md"))), 0, "no archive may be written on preflight failure")
+            ledger_rows = []
+            for ledger in Path(temp_dir).rglob("tasks.jsonl"):
+                ledger_rows += [l for l in ledger.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(ledger_rows, [], f"ledger must stay empty: {ledger_rows}")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_31_settle_rolls_back_local_writes_on_failure(self):
+        """P2-1: 本地链路失败必须整体回滚（外脑 JSONL / 台账 / 新归档恢复原状）。"""
+        import types
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        import kb_manager
+
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_rb_")
+        saved_env = dict(os.environ)
+        original_archive = kb_manager.cmd_archive
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            os.environ["KB_BUILTIN_ROOT"] = env["KB_BUILTIN_ROOT"]
+            os.environ["KAOYAN_USER_BRAIN"] = env["KAOYAN_USER_BRAIN"]
+            os.environ.pop("KB_ROOT", None)
+
+            paths = kb_manager.get_paths()
+            task1_file = Path(paths["user_task1"])
+            ledger_file = Path(paths["tasks"])
+            before_t1 = task1_file.read_text(encoding="utf-8") if task1_file.exists() else ""
+            before_ledger = ledger_file.read_text(encoding="utf-8") if ledger_file.exists() else ""
+
+            payload = {
+                "task_id": "T-RB",
+                "title": "回滚验证",
+                "genre": "complaint",
+                "year": "2012",
+                "exam_type": "2",
+                "essay_content": "Dear Sir or Madam,\n\n    Body.\n\nYours faithfully,\nZhang Wei\n",
+                "batch": {
+                    "status_updates": [],
+                    "new_items": [{
+                        "target": "task1",
+                        "data": {
+                            "category": "functional_sentence",
+                            "genre": "complaint",
+                            "section": "opening",
+                            "expression": "I am writing to lodge a formal complaint regarding [Product].",
+                            "intent": "投诉信开篇定调",
+                            "mastery": "敢用",
+                        },
+                    }],
+                },
+            }
+            payload_file = Path(temp_dir) / "settle_rb.json"
+            payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            def _boom(_args):
+                raise SystemExit(1)
+
+            kb_manager.cmd_archive = _boom
+            args = types.SimpleNamespace(
+                file=str(payload_file), data=None, token=None, mock=True,
+                dry_run=False, json=False, example=False,
+            )
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                with self.assertRaises(SystemExit) as ctx:
+                    kb_manager.cmd_settle(args)
+            self.assertEqual(ctx.exception.code, 1)
+
+            after_t1 = task1_file.read_text(encoding="utf-8") if task1_file.exists() else ""
+            after_ledger = ledger_file.read_text(encoding="utf-8") if ledger_file.exists() else ""
+            self.assertEqual(before_t1, after_t1, "user brain must be rolled back")
+            self.assertEqual(before_ledger, after_ledger, "ledger must be rolled back")
+            self.assertEqual(len(list(Path(temp_dir).rglob("*.md"))), 0, "no archive may survive rollback")
+        finally:
+            kb_manager.cmd_archive = original_archive
+            os.environ.clear()
+            os.environ.update(saved_env)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_32_query_mine_cross_genre_recall(self):
+        """P1-1/P1-2: query --mine 必须跨文类召回个人资产，并能判定初稿命中。"""
+        temp_dir = tempfile.mkdtemp(prefix="test_mine_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            seed_item = {
+                "category": "functional_sentence",
+                "genre": "advice",
+                "section": "opening",
+                "register": "neutral_formal",
+                "intent": "分词状语前置开篇",
+                "expression": "Knowing that you are preparing for [event], I am writing to [purpose].",
+                "mastery": "敢用",
+            }
+            add = {"task_id": "T-MINE-1", "status_updates": [], "new_items": [{"target": "task1", "data": seed_item}]}
+            res_add = self.run_cmd(["batch-update", "--data", json.dumps(add, ensure_ascii=False)], env=env)
+            self.assertEqual(res_add.returncode, 0, f"seed failed: {res_add.stderr}")
+
+            # 1. 跨文类召回：以投诉信为文类检索，建议信资产必须出现并带 [跨文类复用] 标记
+            res_mine = self.run_cmd(["query", "--mine", "--genre", "complaint", "--limit", "20"], env=env)
+            self.assertEqual(res_mine.returncode, 0, f"query --mine failed: {res_mine.stderr}")
+            self.assertIn("跨文类可复用", res_mine.stdout)
+            self.assertIn("[跨文类复用]", res_mine.stdout)
+            self.assertIn(seed_item["expression"], res_mine.stdout)
+
+            # 2. 默认三栏检索行为不得被 --mine 改动
+            res_default = self.run_cmd(["query", "--genre", "advice", "--limit", "5"], env=env)
+            self.assertIn("【一、本题可用已掌握】", res_default.stdout)
+            self.assertIn("【二、本题建议新学】", res_default.stdout)
+            self.assertIn("【三、本题建议结构/模板】", res_default.stdout)
+
+            # 3. 初稿命中判定
+            draft = Path(temp_dir) / "draft.txt"
+            draft.write_text(
+                "Dear Sir or Madam,\n\n    Knowing that you are preparing for the contest, I am writing to confirm my support.\n",
+                encoding="utf-8",
+            )
+            res_hit = self.run_cmd(["query", "--mine", "--genre", "complaint", "--match-file", str(draft), "--json"], env=env)
+            self.assertEqual(res_hit.returncode, 0, f"query --mine --match-file failed: {res_hit.stderr}")
+            data_hit = json.loads(res_hit.stdout)
+            self.assertEqual(len(data_hit["hits"]), 1, f"expected 1 hit, got {data_hit['hits']}")
+            self.assertIn("knowing that you are", data_hit["hits"][0]["evidence"].lower())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_33_check_essay_signature_and_possessive_rules(self):
+        """P0-3/P0-4: 所有格不得误报缩写；署名句号 / 题干署名不符 / 重名 / 敬语失配必须报错。"""
+        possessive_essay = (
+            "Dear Sir or Madam,\n\n"
+            "    The dictionary's screen has gone blank and the brand's service failed.\n\n"
+            "Yours faithfully,\n"
+            "Li Ming"
+        )
+        res = self.run_cmd(["check-essay", "--text", possessive_essay, "--json"])
+        data = json.loads(res.stdout)
+        self.assertEqual(data["contractions"], [], f"possessives must not be flagged: {data['contractions']}")
+
+        # 题干法定署名不符（2012 英二为 Zhang Wei，题中签 Li Ming）+ 敬语配对
+        essay_wrong_name = (
+            "Dear Sir or Madam,\n\n"
+            "    I am writing to lodge a formal complaint.\n\n"
+            "Yours sincerely,\n"
+            "Li Ming."
+        )
+        res2 = self.run_cmd(["check-essay", "--text", essay_wrong_name, "--year", "2012", "--exam-type", "2", "--json"])
+        data2 = json.loads(res2.stdout)
+        self.assertEqual(data2["expected_signoff"], "Zhang Wei")
+        self.assertEqual(data2["detected_signature"], "Li Ming.")
+        joined = " | ".join(data2["format_issues"])
+        self.assertIn("署名误加句号", joined)
+        self.assertIn("题干法定署名不一致", joined)
+        self.assertIn("敬语与称呼不匹配", joined)
+
+        # 收件人与署名重名
+        essay_collision = (
+            "Dear Li Ming,\n\n"
+            "    I am writing to share some news.\n\n"
+            "Best wishes,\n"
+            "Li Ming"
+        )
+        res3 = self.run_cmd(["check-essay", "--text", essay_collision, "--json"])
+        data3 = json.loads(res3.stdout)
+        self.assertIn("收件人与署名重名", " | ".join(data3["format_issues"]))
+
+        # 告示类：机构落款合规、个人署名报警
+        notice_ok = "Notice\n\n    All students are welcome.\n\nThe Student Union"
+        res4 = self.run_cmd(["check-essay", "--text", notice_ok, "--genre", "notice", "--json"])
+        data4 = json.loads(res4.stdout)
+        self.assertEqual([i for i in data4["format_issues"] if "告示" in i or "称呼" in i], [],
+                         f"notice with institution signoff must be clean: {data4['format_issues']}")
+        notice_bad = "Notice\n\n    All students are welcome.\n\nLi Ming"
+        res5 = self.run_cmd(["check-essay", "--text", notice_bad, "--genre", "notice", "--json"])
+        data5 = json.loads(res5.stdout)
+        self.assertIn("落款应为发布机构", " | ".join(data5["format_issues"]))
+
+    def test_34_mandated_signoff_lookup_chain(self):
+        """P0-1 回归保护：题干法定署名链路（2010/2011/2012 英二 = Zhang Wei；其余 = Li Ming）。"""
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        import kb_manager
+
+        for year in ("2010", "2011", "2012"):
+            signoff, rec = kb_manager.lookup_mandated_signoff(year, "2")
+            self.assertIsNotNone(rec, f"{year} English II anchor missing")
+            self.assertEqual(signoff, "Zhang Wei", f"{year} English II should mandate Zhang Wei, got {signoff}")
+
+        for year in ("2019", "2021"):
+            signoff, rec = kb_manager.lookup_mandated_signoff(year, "1")
+            self.assertIsNotNone(rec, f"{year} English I anchor missing")
+            self.assertEqual(signoff, "Li Ming", f"{year} English I should mandate Li Ming, got {signoff}")
+
+    def test_settle_pipeline(self):
+        """Test atomic settle command with batch, archive, maimemo (mock), and verify."""
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_")
+        try:
+            env = dict(self.env)
+            if "KB_ROOT" in env:
+                del env["KB_ROOT"]
+            env["KAOYAN_USER_BRAIN"] = temp_dir
+            self.run_cmd(["init", "--reset"], env=env)
+
+            settle_payload = {
+                "task_id": "T2012-E2-ADV",
+                "genre": "complaint",
+                "year": "2012",
+                "exam_type": "English II",
+                "title": "投诉网购电子词典（2012英二）",
+                "archive": {
+                    "content": "Dear Sir or Madam,\n\n    I am writing to lodge a formal complaint regarding the electronic dictionary that I purchased.\n\nYours faithfully,\nZhang Wei\n",
+                    "metadata": {
+                        "signature": "Zhang Wei",
+                        "word_count": 110,
+                        "points_coverage": "100%"
+                    }
+                },
+                "batch": {
+                    "status_updates": [],
+                    "new_items": [
+                        {
+                            "target": "task1",
+                            "data": {
+                                "category": "functional_sentence",
+                                "genre": "complaint",
+                                "section": "opening",
+                                "register": "neutral_formal",
+                                "intent": "投诉信开篇定调",
+                                "expression": "I am writing to lodge a formal complaint regarding [Product].",
+                                "mastery": "敢用"
+                            }
+                        }
+                    ]
+                },
+                "maimemo": {
+                    "chapter": "2012英二小作文",
+                    "words": [
+                        {
+                            "spelling": "express",
+                            "type": "spelling_fix",
+                            "misspelling": "expree",
+                            "sentence": "I am writing to express my dissatisfaction.",
+                            "translation": "我写信是为了表达不满。",
+                            "usage_note": "考研高频动词",
+                            "grammar_note": "不定式作目的状语"
+                        }
+                    ]
+                }
+            }
+
+            with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".json") as f:
+                json.dump(settle_payload, f, ensure_ascii=False)
+                payload_file = f.name
+
+            try:
+                res = self.run_cmd(["settle", "--file", payload_file, "--mock"], env=env)
+                self.assertEqual(res.returncode, 0, f"settle failed: {res.stderr}\nstdout: {res.stdout}")
+                self.assertIn("外脑双仓入库完成", res.stdout)
+                self.assertIn("范文归档与题目台账登记完成", res.stdout)
+                self.assertIn("墨墨背单词专属词本同步成功", res.stdout)
+                self.assertIn("知识库一致性校验通过", res.stdout)
+
+                # Check archive file created
+                md_files = [f for f in Path(temp_dir).rglob("*.md")]
+                self.assertGreaterEqual(len(md_files), 1, f"No md files found in {temp_dir}")
+
+                # Check tasks.jsonl
+                tasks_files = [f for f in Path(temp_dir).rglob("tasks.jsonl")]
+                self.assertGreaterEqual(len(tasks_files), 1, f"No tasks.jsonl found in {temp_dir}")
+                found_task = False
+                for tf in tasks_files:
+                    with open(tf, "r", encoding="utf-8") as f:
+                        if "T2012-E2-ADV" in f.read():
+                            found_task = True
+                            break
+                self.assertTrue(found_task, "T2012-E2-ADV not recorded in tasks.jsonl")
+            finally:
+                if os.path.exists(payload_file):
+                    os.remove(payload_file)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

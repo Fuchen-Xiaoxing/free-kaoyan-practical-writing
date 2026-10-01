@@ -80,6 +80,27 @@ def normalize_genre(genre: str) -> str:
     g = str(genre).lower().strip()
     return GENRE_ALIASES.get(g, g)
 
+EXAM_TYPE_ALIASES = {
+    "1": "English I", "英一": "English I", "英语一": "English I", "考研英语一": "English I",
+    "eng1": "English I", "english1": "English I", "english 1": "English I",
+    "english i": "English I", "i": "English I",
+    "2": "English II", "英二": "English II", "英语二": "English II", "考研英语二": "English II",
+    "eng2": "English II", "english2": "English II", "english 2": "English II",
+    "english ii": "English II", "ii": "English II",
+}
+
+def normalize_exam_type(exam_type, default: str = "考研小作文") -> str:
+    """归一化试卷类型，统一归档 / 台账 / 词本章节取值（English I / English II）。
+
+    仅收敛明确的英一/英二写法，其余原样保留（例如自拟题、考研英语、英二模拟卷等）。
+    """
+    if exam_type is None:
+        return default
+    raw = str(exam_type).strip()
+    if not raw:
+        return default
+    return EXAM_TYPE_ALIASES.get(raw.lower(), raw)
+
 # Scenario relevance mapping for genres to eliminate cross-scenario noise
 GENRE_TO_SCENARIOS = {
     "invitation": ["校园文体、学术讲座与国际研讨会", "文化交流与文旅推荐", "志愿服务与校园公益"],
@@ -687,16 +708,56 @@ def cmd_anchor(args):
             print(f"\n• [提示] 官方范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
 
 def extract_mandated_signoff(prompt: str) -> str:
-    """从 Directions 题干中提取官方指定署名，未指定时默认为 Li Ming"""
+    """从 Directions 题干中提取官方指定署名。
+
+    仅当题干明文给出替代署名时才返回该署名；题干未给出署名要求时，返回带括号的
+    显式提示，绝不把"默认值"伪装成官方指定署名，以免与内置范文落款产生冲突。
+    """
     if not prompt:
-        return "Li Ming (默认)"
+        return "未指定（题干缺失，需人工确认）"
     m = re.search(r'Use\s+["“]([^"”]+)["”]\s+instead', prompt, re.IGNORECASE)
     if m:
         return m.group(1).strip()
     m2 = re.search(r'sign\s+your\s+name\s+as\s+["“]([^"”]+)["”]', prompt, re.IGNORECASE)
     if m2:
         return m2.group(1).strip()
-    return "Li Ming (默认)"
+    if re.search(r'Do not\s+(?:use|sign)[^.]*?name', prompt, re.IGNORECASE):
+        return "未指定（题干仅要求不得署真实姓名，通知/纪要类请署机构或职务名）"
+    return "未指定（题干未给出署名要求，需人工确认）"
+
+def lookup_mandated_signoff(year, exam_type, genre: str = None):
+    """按年份/卷别（可带文类）从内置真题标尺查取题干法定署名。
+
+    返回 (署名, 命中记录)。未命中返回 (None, None)；题干未给出具体署名时
+    签名字段为 "未指定（...）" 形式的提示串，调用方需自行判别。
+    """
+    if not year and not exam_type:
+        return None, None
+    try:
+        paths = get_paths()
+        anchors = read_jsonl(paths["anchors"])
+    except Exception:
+        return None, None
+
+    year_target = str(year).strip() if year else None
+    exam_norm = normalize_exam_type(exam_type, default="") if exam_type else ""
+    genre_target = normalize_genre(genre) if genre else None
+
+    fallback = None
+    for rec in anchors:
+        if year_target and str(rec.get("year", "")) != year_target:
+            continue
+        if exam_norm and str(rec.get("exam_type", "")).strip().lower() != exam_norm.lower():
+            continue
+        if genre_target:
+            if normalize_genre(rec.get("genre", "")) != genre_target:
+                if fallback is None:
+                    fallback = rec
+                continue
+        return extract_mandated_signoff(rec.get("prompt", "")), rec
+    if fallback is not None:
+        return extract_mandated_signoff(fallback.get("prompt", "")), fallback
+    return None, None
 
 def cmd_prompt(args):
     """
@@ -796,6 +857,125 @@ def cmd_prompt(args):
         print(f"• 语域与语气深度剖析:\n  {p['register_analysis']}")
         print("\n*(本命令已对官方范文执行物理级隔离，输出中 100% 零范文泄露)*")
 
+def _expression_core_words(text: str) -> list:
+    """把表达/句式骨架（含 [slot] 占位符）归一化为可匹配的实词序列。"""
+    core = re.sub(r"\[[^\]]*\]", " ", text or "")
+    core = re.sub(r"[^A-Za-z\s]", " ", core)
+    return [w for w in core.lower().split() if w]
+
+
+def _draft_normalized(draft: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Za-z\s]", " ", draft or "").lower()).strip()
+
+
+def _match_draft(core_words: list, draft_norm: str) -> str:
+    """返回命中的片段描述；未命中返回空串。以 4 词/5 词/3 词连续片段做证据匹配。"""
+    if not core_words or not draft_norm:
+        return ""
+    n = len(core_words)
+    for span in (4, 5, 3):
+        if n < span:
+            continue
+        for i in range(0, n - span + 1):
+            frag = " ".join(core_words[i:i + span])
+            if frag in draft_norm:
+                return frag
+    return ""
+
+
+def _query_mine(args, paths: dict):
+    """个人外脑全量检索（跨文类召回）：为阶段 1【外脑连接】与「我的外脑里有什么」提供事实依据。
+
+    与默认三栏检索不同，本模式不做 genre / scenario 过滤，仅按「同文类优先 + 掌握度」分层，
+    并把非本篇章文类的资产显式标记为 [跨文类复用]，避免学生已有积累被文类过滤器吞掉。
+    """
+    genre_filter = normalize_genre(args.genre) if getattr(args, "genre", None) else None
+    section_filter = (getattr(args, "section", None) or "").lower().strip()
+    limit = max(1, int(getattr(args, "limit", 20) or 20))
+
+    records = []
+    if paths["user_task1"].exists():
+        records += read_jsonl(paths["user_task1"])
+    if paths["user_shared"].exists():
+        records += read_jsonl(paths["user_shared"])
+
+    draft_norm = ""
+    match_file = getattr(args, "match_file", None)
+    if match_file:
+        try:
+            with open(Path(match_file).expanduser(), "r", encoding="utf-8") as f:
+                draft_norm = _draft_normalized(f.read())
+        except Exception as e:
+            print(f"[ERROR] 无法读取 --match-file: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    same_genre, cross_genre, hits = [], [], []
+    for rec in records:
+        if rec.get("status") == "retired" or rec.get("exam_band") == "超纲":
+            continue
+        item_genre = normalize_genre(rec.get("genre", ""))
+        if section_filter and section_filter not in ("all", "any"):
+            item_sec = (rec.get("section") or "any").lower()
+            if item_sec not in (section_filter, "any"):
+                continue
+        is_same = bool(genre_filter and item_genre == genre_filter) or item_genre in ("general", "common", "all", "shared", "")
+        entry = {
+            "id": rec.get("id", "N/A"),
+            "mastery": rec.get("mastery", "未接触"),
+            "genre": item_genre or "general",
+            "section": rec.get("section", "body"),
+            "category": rec.get("category") or rec.get("type") or "",
+            "expression": rec.get("text") or rec.get("expression") or rec.get("verb_phrase") or "",
+            "intent": rec.get("meaning") or rec.get("intent_cn") or rec.get("intent", ""),
+            "cross_genre": not is_same,
+        }
+        if draft_norm:
+            frag = _match_draft(_expression_core_words(entry["expression"]), draft_norm)
+            if frag:
+                entry["evidence"] = frag
+                hits.append(entry)
+                continue
+        (same_genre if is_same else cross_genre).append(entry)
+
+    rank = lambda e: MASTERY_RANK.get(e["mastery"], 1)
+    hits.sort(key=rank, reverse=True)
+    same_genre.sort(key=rank, reverse=True)
+    cross_genre.sort(key=rank, reverse=True)
+
+    selected = (hits + same_genre + cross_genre)[:limit]
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "hits": hits, "same_genre": same_genre, "cross_genre": cross_genre,
+            "total_assets": len(records),
+        }, ensure_ascii=False, indent=2))
+        return
+
+    print(f"=== 个人外脑全量检索 (跨文类召回) | 资产总数 {len(records)} 条 | 文类基准: {genre_filter or '未指定'} ===")
+    if not records:
+        print("  (个人外脑暂无任何资产，本篇无法复用；请在阶段 3 完成首次沉淀)")
+        return
+    if not selected:
+        print("  (未检索到匹配条目)")
+        return
+
+    def dump(group_title, items):
+        if not items:
+            return
+        print(f"\n{group_title}")
+        for it in items:
+            tag = " [跨文类复用]" if it["cross_genre"] else ""
+            ev = f" | 命中片段: `{it['evidence']}`" if it.get("evidence") else ""
+            print(f"  • [{it['id']}]{tag} 【{it['mastery']}】 {it['intent']}")
+            print(f"    骨架: `{it['expression']}` | 文类: {it['genre']} | 段位: {it['section']}{ev}")
+
+    dump("【一、初稿已实际命中】(建议在【外脑连接】中原样引用)", hits)
+    dump("【二、同文类可复用】", same_genre)
+    dump("【三、跨文类可复用】(他类信体积累的通用骨架，投诉/建议/道歉等可迁移)", cross_genre)
+    if not hits:
+        print("\n【提示】初稿未命中任何个人外脑资产，请如实说明，并从上面第二/三组中推荐 1~2 条建议激活项。")
+
+
 def cmd_query(args):
     paths = get_paths()
 
@@ -804,6 +984,10 @@ def cmd_query(args):
     scenario_filter = args.scenario.lower().strip() if args.scenario else None
     status_filter = args.status.strip() if args.status else None
     section_filter = args.section.lower().strip() if getattr(args, "section", None) else None
+
+    # 个人外脑全量检索模式（阶段 1【外脑连接】/「我的外脑里有什么」专用）
+    if getattr(args, "mine", False):
+        return _query_mine(args, paths)
 
     # Determine allowed scenarios for genre
     allowed_scenarios = set()
@@ -1382,6 +1566,16 @@ def cmd_batch_update(args):
 
     now_iso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # 结构化执行结果：供 settle 判定真实成功/失败，杜绝"静默无操作却报成功"
+    result = {
+        "status_updates_applied": 0,
+        "status_updates_unmatched": [],
+        "status_updates_invalid": [],
+        "new_items_added": [],
+        "new_items_rejected": [],
+        "new_items_skipped": [],
+    }
+
     # 1. Process status updates
     if status_updates:
         task1_records = read_jsonl(paths["task1"])
@@ -1399,6 +1593,8 @@ def cmd_batch_update(args):
             is_error = upd.get("error", False)
 
             if not t_id or proposed_st not in MASTERY_RANK:
+                result["status_updates_invalid"].append(t_id or "<empty-id>")
+                print(f"  [INVALID] 状态更新条目非法（id='{t_id}', status='{proposed_st}'），已忽略")
                 continue
 
             found = False
@@ -1447,7 +1643,11 @@ def cmd_batch_update(args):
                     hist["user_notes"] = f"{prev}; [{now_iso}] {note}".strip("; ")
 
                 log_history(paths, "update_status", display_id, old_st, actual_st, note, task_id)
-                print(f"  [STATUS] [{display_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
+                if actual_st != proposed_st:
+                    print(f"  [STATUS] [{display_id}] {old_st} ➔ {actual_st}（提议 '{proposed_st}' 被晋级/纠偏规则改写，独立={is_independent}，批注={note}）")
+                else:
+                    print(f"  [STATUS] [{display_id}] {old_st} ➔ {actual_st} (独立={is_independent}, 批注={note})")
+                result["status_updates_applied"] += 1
 
             # Check user task1 first
             for rec in task1_records:
@@ -1493,12 +1693,18 @@ def cmd_batch_update(args):
                         updated_count += 1
                         break
 
+            if not found:
+                result["status_updates_unmatched"].append(t_id)
+                print(f"  [MISS] 未在任何仓（个人 task1 / 个人 shared / 出厂底座）中定位到条目: {t_id}，掌握度未变更")
+
         save_user_task1(paths, task1_records)
         if user_shared_records:
             save_user_shared(paths, user_shared_records)
         elif is_shared_writable:
             write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 已成功更新 {updated_count} 条条目的掌握度状态。")
+        if result["status_updates_unmatched"]:
+            print(f"[WARN] 有 {len(result['status_updates_unmatched'])} 条状态更新未命中: {', '.join(result['status_updates_unmatched'])}")
 
     # 2. Process new items
     if new_items:
@@ -1517,8 +1723,12 @@ def cmd_batch_update(args):
             target = item_wrapper.get("target", "task1").lower()
             item = item_wrapper.get("data", item_wrapper)
 
+            if not item.get("source"):
+                item["source"] = f"{task_id} 实战沉淀" if task_id else "实战沉淀"
+
             ok, reason = check_admission_rules(item)
             if not ok:
+                result["new_items_rejected"].append({"reason": reason, "intent": item.get("intent", item.get("intent_cn", ""))})
                 print(f"  [REJECT] 准入失败: {reason} | {item.get('intent', item.get('intent_cn', ''))}")
                 continue
 
@@ -1527,6 +1737,7 @@ def cmd_batch_update(args):
             item["dedup_key"] = key
 
             if key and key in existing_keys:
+                result["new_items_skipped"].append(key)
                 print(f"  [SKIP] 条目已存在，跳过: {key}")
                 continue
 
@@ -1561,6 +1772,8 @@ def cmd_batch_update(args):
                 item["exam_band"] = "大纲内"
             if "genre" in item:
                 item["genre"] = normalize_genre(item["genre"])
+            if not item.get("source"):
+                item["source"] = f"{task_id} 实战沉淀" if task_id else "实战沉淀"
 
             used_in = [task_id] if task_id else []
             if "history" not in item or not isinstance(item["history"], dict):
@@ -1581,12 +1794,14 @@ def cmd_batch_update(args):
                 added_task1 += 1
                 existing_keys.add(key)
                 log_history(paths, "batch_append", item["id"], None, item, "Batch new item", task_id)
+                result["new_items_added"].append({"id": item["id"], "target": "task1"})
                 print(f"  [NEW] 追加至 task1: [{item['id']}] {item.get('intent', '')} ({item.get('mastery', '')})")
             else:
                 shared_records.append(item)
                 added_shared += 1
                 existing_keys.add(key)
                 log_history(paths, "batch_append", item["id"], None, item, "Batch new morpheme", task_id)
+                result["new_items_added"].append({"id": item["id"], "target": "shared"})
                 print(f"  [NEW] 追加至 shared: [{item['id']}] {item.get('intent_cn', item.get('meaning', item.get('intent', '')))} ({item.get('mastery', '')})")
 
         if added_task1 > 0:
@@ -1597,6 +1812,10 @@ def cmd_batch_update(args):
             elif is_shared_writable:
                 write_jsonl(paths["shared"], shared_records)
         print(f"[OK] 批量录入完成：追加 task1 条目 {added_task1} 条，shared 条目 {added_shared} 条。")
+
+    result["synced_task1"] = len([i for i in result["new_items_added"] if i.get("target") == "task1"])
+    result["synced_shared"] = len([i for i in result["new_items_added"] if i.get("target") == "shared"])
+    return result
 
 def cmd_update_status(args):
     paths = get_paths()
@@ -1769,7 +1988,7 @@ python3 scripts/kb_manager.py archive \\
     title = args.title.strip()
     genre = normalize_genre(args.genre) if args.genre else "general"
     task_id = getattr(args, "task_id", None) or f"T{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
-    exam_type = getattr(args, "exam_type", None) or "考研小作文"
+    exam_type = normalize_exam_type(getattr(args, "exam_type", None))
 
     # Year handling: default to exam year if given, else current year
     year = args.year.strip() if args.year else str(datetime.datetime.now().year)
@@ -1865,14 +2084,35 @@ python3 scripts/kb_manager.py archive \\
         "archived_path": str(target_file).replace("\\", "/"),
         "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    with open(tasks_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(task_entry, ensure_ascii=False) + "\n")
-    if paths["user_task1_tasks"].parent.exists():
-        with open(paths["user_task1_tasks"], "a", encoding="utf-8") as f:
-            f.write(json.dumps(task_entry, ensure_ascii=False) + "\n")
+    # 台账按 task_id upsert：同一任务重复归档只保留最新一行，且同一文件绝不重复写入
+    ledger_targets = []
+    seen_ledger = set()
+    for cand in (paths["tasks"], paths.get("user_task1_tasks")):
+        if not cand:
+            continue
+        # 双仓布局下 paths["tasks"] 与 paths["user_task1_tasks"] 可能指向同一文件，必须先按真实路径去重
+        if not cand.parent.exists():
+            continue
+        rp = cand.resolve()
+        if rp in seen_ledger:
+            continue
+        seen_ledger.add(rp)
+        ledger_targets.append(cand)
 
+    allow_duplicate = bool(getattr(args, "force", False))
+    for ledger in ledger_targets:
+        if allow_duplicate:
+            with open(ledger, "a", encoding="utf-8") as f:
+                f.write(json.dumps(task_entry, ensure_ascii=False) + "\n")
+        else:
+            kept = [r for r in read_jsonl(ledger) if r.get("task_id") != task_id]
+            kept.append(task_entry)
+            write_jsonl(ledger, kept)
+
+    ledger_desc = ", ".join(str(p) for p in ledger_targets) if ledger_targets else "无可用台账"
     print(f"[OK] 范文已成功归档至: {target_file}")
-    print(f"[OK] 题目台账已同步至: {tasks_file}")
+    print(f"[OK] 题目台账已同步至: {ledger_desc}")
+    return target_file
 
 def cmd_session(args):
     paths = get_paths()
@@ -1978,9 +2218,9 @@ def cmd_cleanup(args):
     else:
         print("[INFO] 本次为试运行，添加 --apply 可实际执行软删除与降权。")
 
-def cmd_verify(args):
-    paths = get_paths()
-    print(f"=== 开始严格校验知识库 ===\n• 教研底座: {paths['base_root']}\n• 用户外脑: {paths['user_root']}")
+def verify_integrity(paths: dict, verbose: bool = True) -> tuple[bool, int]:
+    if verbose:
+        print(f"=== 开始严格校验知识库 ===\n• 教研底座: {paths['base_root']}\n• 用户外脑: {paths['user_root']}")
 
     has_error = False
     total_valid = 0
@@ -1988,7 +2228,8 @@ def cmd_verify(args):
     # 1. Verify anchors/task1_past_papers.jsonl
     anc_path = paths["anchors"]
     if not anc_path.exists():
-        print(f"[FAIL] {anc_path.name} 文件不存在！", file=sys.stderr)
+        if verbose:
+            print(f"[FAIL] {anc_path.name} 文件不存在！", file=sys.stderr)
         has_error = True
     else:
         seen_ids = set()
@@ -2001,28 +2242,46 @@ def cmd_verify(args):
                 try:
                     anc_records.append((l_num, json.loads(line)))
                 except json.JSONDecodeError as e:
-                    print(f"[FAIL] {anc_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {anc_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
                     has_error = True
 
         for l_num, rec in anc_records:
             r_id = rec.get("id")
             if not r_id or r_id in seen_ids:
-                print(f"[FAIL] {anc_path.name}:{l_num} ID缺失或重复: {r_id}", file=sys.stderr)
+                if verbose:
+                    print(f"[FAIL] {anc_path.name}:{l_num} ID缺失或重复: {r_id}", file=sys.stderr)
                 has_error = True
             seen_ids.add(r_id)
 
             for req_field in ("genre", "relationship", "register", "prompt", "official_model", "register_analysis"):
                 if not rec.get(req_field):
-                    print(f"[FAIL] {anc_path.name}:{l_num} [{r_id}] 缺少必填字段: {req_field}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {anc_path.name}:{l_num} [{r_id}] 缺少必填字段: {req_field}", file=sys.stderr)
                     has_error = True
 
-        print(f"[{'PASS' if not has_error else 'WARN'}] anchors ({anc_path.name}): 校验完成，有效记录 {len(anc_records)} 条。")
+            # 署名链路防回退：真题题干必须给出替代署名指令或"不得使用真实姓名"约束
+            if rec.get("is_real_exam", True):
+                pr = rec.get("prompt", "") or ""
+                has_directive = bool(
+                    re.search(r'Use\s+["“][^"”]+["”]\s+instead', pr, re.IGNORECASE)
+                    or re.search(r'sign\s+your\s+name\s+as\s+["“][^"”]+["”]', pr, re.IGNORECASE)
+                    or re.search(r'Do not\s+(?:use|sign)[^.]*?name', pr, re.IGNORECASE)
+                )
+                if not has_directive:
+                    if verbose:
+                        print(f"[FAIL] {anc_path.name}:{l_num} [{r_id}] 真题题干缺少署名指令（署名链路将回退为默认 Li Ming）", file=sys.stderr)
+                    has_error = True
+
+        if verbose:
+            print(f"[{'PASS' if not has_error else 'WARN'}] anchors ({anc_path.name}): 校验完成，有效记录 {len(anc_records)} 条。")
         total_valid += len(anc_records)
 
     # 2. Verify shared scenario morphemes (system base seeds)
     sh_path = paths["shared"]
     if not sh_path.exists():
-        print(f"[FAIL] {sh_path.name} 文件不存在！", file=sys.stderr)
+        if verbose:
+            print(f"[FAIL] {sh_path.name} 文件不存在！", file=sys.stderr)
         has_error = True
     else:
         seen_ids = set()
@@ -2035,28 +2294,34 @@ def cmd_verify(args):
                 try:
                     sh_records.append((l_num, json.loads(line)))
                 except json.JSONDecodeError as e:
-                    print(f"[FAIL] {sh_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {sh_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
                     has_error = True
 
         for l_num, rec in sh_records:
             r_id = rec.get("id")
             if not r_id:
-                print(f"[FAIL] {sh_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
+                if verbose:
+                    print(f"[FAIL] {sh_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
                 has_error = True
             elif r_id in seen_ids:
-                print(f"[FAIL] {sh_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
+                if verbose:
+                    print(f"[FAIL] {sh_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
                 has_error = True
             else:
                 seen_ids.add(r_id)
 
             if not rec.get("scenario"):
-                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: scenario", file=sys.stderr)
+                if verbose:
+                    print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: scenario", file=sys.stderr)
                 has_error = True
             if not rec.get("verb_phrase") and not rec.get("text"):
-                print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: verb_phrase/text", file=sys.stderr)
+                if verbose:
+                    print(f"[FAIL] {sh_path.name}:{l_num} [{r_id}] 缺少必填字段: verb_phrase/text", file=sys.stderr)
                 has_error = True
 
-        print(f"[{'PASS' if not has_error else 'WARN'}] shared ({sh_path.name}): 校验完成，有效记录 {len(sh_records)} 条。")
+        if verbose:
+            print(f"[{'PASS' if not has_error else 'WARN'}] shared ({sh_path.name}): 校验完成，有效记录 {len(sh_records)} 条。")
         total_valid += len(sh_records)
 
     # 3. Verify task1_expressions.jsonl (user brain, allows 0 records for clean slate)
@@ -2070,7 +2335,8 @@ def cmd_verify(args):
                 seen_check_paths.add(rp)
 
     if not t1_check_paths:
-        print(f"[FAIL] task1 文件不存在！", file=sys.stderr)
+        if verbose:
+            print(f"[FAIL] task1 文件不存在！", file=sys.stderr)
         has_error = True
     else:
         for t1_path in t1_check_paths:
@@ -2084,61 +2350,77 @@ def cmd_verify(args):
                     try:
                         t1_records.append((l_num, json.loads(line)))
                     except json.JSONDecodeError as e:
-                        print(f"[FAIL] {t1_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
+                        if verbose:
+                            print(f"[FAIL] {t1_path.name}:{l_num} JSON格式解析错误: {e}", file=sys.stderr)
                         has_error = True
 
             for l_num, rec in t1_records:
                 r_id = rec.get("id")
                 if not r_id:
-                    print(f"[FAIL] {t1_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} 缺少必填字段: id", file=sys.stderr)
                     has_error = True
                 elif r_id in seen_ids:
-                    print(f"[FAIL] {t1_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} ID重复: {r_id}", file=sys.stderr)
                     has_error = True
                 else:
                     seen_ids.add(r_id)
 
                 cat = rec.get("category") or rec.get("type")
                 if cat not in VALID_CATEGORIES:
-                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 category: {cat}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 category: {cat}", file=sys.stderr)
                     has_error = True
 
                 m = rec.get("mastery")
                 if m not in MASTERY_RANK:
-                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 mastery: {m}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 mastery: {m}", file=sys.stderr)
                     has_error = True
 
                 st = rec.get("status", "active")
                 if st not in VALID_STATUSES:
-                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 status: {st}", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 非法 status: {st}", file=sys.stderr)
                     has_error = True
 
                 if not rec.get("source"):
-                    print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 缺少必填字段: source", file=sys.stderr)
+                    if verbose:
+                        print(f"[FAIL] {t1_path.name}:{l_num} [{r_id}] 缺少必填字段: source", file=sys.stderr)
                     has_error = True
 
             status_tag = 'PASS' if not has_error else 'WARN'
-            if len(t1_records) == 0:
-                print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，纯净白纸就绪 (有效实战积累 0 条)。")
-            else:
-                print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，有效记录 {len(t1_records)} 条。")
+            if verbose:
+                if len(t1_records) == 0:
+                    print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，纯净白纸就绪 (有效实战积累 0 条)。")
+                else:
+                    print(f"[{status_tag}] task1 ({t1_path.name}): 校验完成，有效记录 {len(t1_records)} 条。")
             total_valid += len(t1_records)
 
     # 4. Verify user_shared morphemes (allows 0 records)
     if paths["user_shared"].exists():
         u_sh_records = read_jsonl(paths["user_shared"])
-        if len(u_sh_records) == 0:
-            print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，纯净白纸就绪 (有效实战语素 0 条)。")
-        else:
-            print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，有效实战语素 {len(u_sh_records)} 条。")
+        if verbose:
+            if len(u_sh_records) == 0:
+                print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，纯净白纸就绪 (有效实战语素 0 条)。")
+            else:
+                print(f"[PASS] user_shared ({paths['user_shared'].name}): 校验完成，有效实战语素 {len(u_sh_records)} 条。")
         total_valid += len(u_sh_records)
 
     # 5. Verify satisfaction archives
     arch_dir = paths["archives"]
     if arch_dir.exists():
         md_files = list(arch_dir.glob("*.md"))
-        print(f"[PASS] archives ({arch_dir.parent.name}/{arch_dir.name}): 包含 {len(md_files)} 篇满意归档作文。")
+        if verbose:
+            print(f"[PASS] archives ({arch_dir.parent.name}/{arch_dir.name}): 包含 {len(md_files)} 篇满意归档作文。")
 
+    return has_error, total_valid
+
+
+def cmd_verify(args):
+    paths = get_paths()
+    has_error, total_valid = verify_integrity(paths, verbose=True)
     if has_error:
         print(f"\n[FAIL] 知识库验证失败！请修复以上列出的错误。", file=sys.stderr)
         sys.exit(1)
@@ -2210,14 +2492,24 @@ def cmd_check_essay(args):
     ratios = [round(c / body_total * 10, 1) if body_total > 0 else 0 for c in p_counts]
     ratio_str = " : ".join(str(r) for r in ratios) if ratios else "无"
 
-    # Contraction check
-    contraction_pattern = re.compile(
-        r"\b([a-zA-Z]+'([a-zA-Z]{1,2}))\b",
-        re.IGNORECASE
-    )
+    # Contraction check (P0-4 修正：显式契约，绝不把名词所有格误判为口语缩写)
+    contraction_pattern = re.compile(r"\b([A-Za-z]+)['\u2019]([A-Za-z]+)\b")
+    s_form_contractions = {
+        "i", "you", "he", "she", "it", "we", "they", "that", "there", "here",
+        "what", "who", "let", "this", "how", "where", "when", "why", "one",
+        "everybody", "somebody", "nobody", "anybody", "something", "nothing",
+    }
     contractions_found = []
     for line_no, line in enumerate(content.splitlines(), 1):
         for m in contraction_pattern.finditer(line):
+            stem = m.group(1).lower()
+            tail = m.group(2).lower()
+            if tail == "s":
+                # 仅「代词/指示词 + 's」属缩写；dictionary's / parents' 等所有格一律不判为缩写
+                if stem not in s_form_contractions:
+                    continue
+            elif tail not in ("t", "re", "ve", "ll", "d", "m"):
+                continue
             contractions_found.append((line_no, m.group(0)))
 
     # Exclamation check
@@ -2225,7 +2517,9 @@ def cmd_check_essay(args):
 
     # Format checks
     format_issues = []
-    if salutation:
+    salutation_head = bool(salutation and re.match(r'^(dear\b|to\b)', salutation, re.IGNORECASE))
+    notice_title = bool(salutation and re.match(r'^(notice|announcement)\b', salutation, re.IGNORECASE))
+    if salutation_head:
         if salutation.endswith(":") or salutation.endswith("："):
             format_issues.append(f"称呼误用冒号（'{salutation}'），考研公文一律使用英文半角逗号")
         elif salutation.endswith("，"):
@@ -2233,13 +2527,85 @@ def cmd_check_essay(args):
         elif not salutation.endswith(","):
             format_issues.append(f"称呼末尾缺少英文逗号（'{salutation}'）")
 
+    signoff_phrase_line = None
     for s_line in signoff:
         if re.match(r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully)', s_line, re.IGNORECASE):
+            if signoff_phrase_line is None:
+                signoff_phrase_line = s_line
             if not s_line.endswith(","):
                 format_issues.append(f"结语敬语缺少英文逗号（'{s_line}'）")
-        if re.match(r'^(li\s+ming)', s_line, re.IGNORECASE):
-            if s_line.endswith("."):
-                format_issues.append(f"署名误加句号（'{s_line}'），署名严禁加句号")
+
+    # 署名核验（P0-3）：题干法定署名 / 句号 / 与收件人重名 / 敬语配对 / 告示机构落款
+    detected_signature = None
+    for s_line in reversed(signoff):
+        if not re.match(
+            r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|'
+            r'sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
+            s_line, re.IGNORECASE
+        ):
+            detected_signature = s_line
+            break
+
+    addressee = None
+    if salutation:
+        m_addr = re.match(r'^dear\s+(.+?)\s*[,:：]?\s*$', salutation, re.IGNORECASE)
+        if m_addr:
+            addressee = m_addr.group(1).strip().strip(",:：").strip()
+    addressee_is_unknown = bool(
+        addressee and re.match(r'^(sir|madam|sir\s+or\s+madam|madam\s+or\s+sir|dear\s+sir|dear\s+madam)', addressee, re.IGNORECASE)
+    )
+
+    expected_signoff = None
+    signoff_note = ""
+    if getattr(args, "signoff", None):
+        expected_signoff = str(args.signoff).strip()
+    elif getattr(args, "year", None) or getattr(args, "exam_type", None):
+        looked, matched_rec = lookup_mandated_signoff(
+            getattr(args, "year", None), getattr(args, "exam_type", None), getattr(args, "genre", None)
+        )
+        if looked and not str(looked).startswith("未指定"):
+            expected_signoff = looked
+        elif looked:
+            signoff_note = looked
+        else:
+            signoff_note = "未在真题标尺中定位到该年份/卷别的题干，无法校验法定署名"
+
+    if detected_signature:
+        if detected_signature.endswith("."):
+            format_issues.append(f"署名误加句号（'{detected_signature}'），署名严禁加句号")
+        if expected_signoff and detected_signature.strip().rstrip(".,").lower() != expected_signoff.lower():
+            format_issues.append(
+                f"落款署名与题干法定署名不一致（本篇为 '{detected_signature.strip()}'，题干法定为 '{expected_signoff}'）"
+            )
+        if addressee and not addressee_is_unknown:
+            if detected_signature.strip().rstrip(".,").lower() == addressee.lower():
+                format_issues.append(
+                    f"收件人与署名重名（称呼 '{salutation}' 与落款 '{detected_signature.strip()}' 同名），严禁收件人与署名重名"
+                )
+
+    if signoff_phrase_line and addressee and not notice_title:
+        phrase_text = signoff_phrase_line.strip().rstrip(",.").lower()
+        is_faithfully = phrase_text.startswith("yours faithfully")
+        is_sincerely_family = phrase_text.startswith(("yours sincerely", "sincerely yours", "yours truly", "sincerely"))
+        has_complimentary = phrase_text.startswith(("yours", "sincerely", "best", "kind", "warm"))
+        if addressee_is_unknown and has_complimentary and not is_faithfully:
+            format_issues.append(
+                f"敬语与称呼不匹配：不知收件人姓名（'{salutation}'）应使用 'Yours faithfully,'，当前为 '{signoff_phrase_line}'"
+            )
+        elif (not addressee_is_unknown) and is_faithfully:
+            format_issues.append(
+                f"敬语与称呼不匹配：已知收件人姓名（'{salutation}'）应使用 'Yours sincerely,'，当前为 '{signoff_phrase_line}'"
+            )
+
+    genre_norm = normalize_genre(getattr(args, "genre", "") or "")
+    is_notice = genre_norm == "notice" or notice_title
+    if is_notice:
+        if salutation_head:
+            format_issues.append(f"告示/通知类严禁使用称呼（'{salutation}'）")
+        if detected_signature and not re.match(
+            r'^(the\s+|recorder\b|postgraduate|student\s+union|organizing|department|office)', detected_signature, re.IGNORECASE
+        ):
+            format_issues.append(f"告示/通知类落款应为发布机构（当前为个人署名 '{detected_signature}'）")
 
     # Word count safety assessment
     wc_status = "PASS"
@@ -2266,7 +2632,11 @@ def cmd_check_essay(args):
             "word_count_status": wc_status,
             "contractions": contractions_found,
             "exclamations": exclamation_count,
-            "format_issues": format_issues
+            "format_issues": format_issues,
+            "salutation": salutation,
+            "detected_signature": detected_signature,
+            "expected_signoff": expected_signoff,
+            "signoff_note": signoff_note,
         }
         print(json.dumps(res, ensure_ascii=False, indent=2))
         return
@@ -2294,6 +2664,15 @@ def cmd_check_essay(args):
             print(f"  - {iss}")
     else:
         print("• 格式与标点扫描: [PASS] 称呼逗号、结尾敬语与署名规范全部合规")
+
+    sig_desc = detected_signature.strip() if detected_signature else "未检出"
+    if expected_signoff:
+        sig_check = f"题干法定 '{expected_signoff}' | [{'PASS' if not any('署名' in i for i in format_issues) else 'FAIL'}]"
+    elif signoff_note:
+        sig_check = f"未校验（{signoff_note}）"
+    else:
+        sig_check = "未校验（未提供 --year/--exam-type/--signoff）"
+    print(f"• 署名核验: 本篇 '{sig_desc}' | {sig_check}")
 
     print("======================================================================")
 
@@ -2456,7 +2835,22 @@ def cmd_maimemo_sync(args):
 
     try:
         res = sync_essay_vocabulary(payload, token=args.token, mock=args.mock, dry_run=args.dry_run)
-        if getattr(args, "json", False):
+        if res.get("status") in ("partial_failed", "error"):
+            err_msg = res.get("message", "所选单词未能匹配或同步失败")
+            if getattr(args, "json", False):
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(f"[ERROR] 墨墨同步失败: {err_msg}", file=sys.stderr)
+                if res.get("skipped_words"):
+                    print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}", file=sys.stderr)
+            sys.exit(1)
+        elif res.get("status") == "skipped":
+            if getattr(args, "json", False):
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(f"[INFO] {res.get('message')}")
+            return
+        elif getattr(args, "json", False):
             print(json.dumps(res, ensure_ascii=False, indent=2))
         else:
             print(f"=== 墨墨背单词同步完成 ===")
@@ -2467,6 +2861,8 @@ def cmd_maimemo_sync(args):
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
             print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
+            if res.get("highlight_missing"):
+                print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)
             print(f"今日复习流: 已推入 (advance=True)")
     except Exception as e:
         err_msg = str(e)
@@ -2475,6 +2871,434 @@ def cmd_maimemo_sync(args):
         else:
             print(f"同步失败: {err_msg}", file=sys.stderr)
         sys.exit(1)
+
+SETTLE_SNAPSHOT_KEYS = ("user_task1", "user_shared", "tasks", "history_log")
+
+
+def _load_settle_payload(raw_data: str) -> dict:
+    """解析并归一化结算载荷。
+
+    同时兼容 SKILL.md 文档化的顶层 `essay_content` 与 CLI 示例的 `archive.content`，
+    避免文档与实现不一致导致"静默跳过归档却报成功"。
+    """
+    spec = json.loads(raw_data)
+    if not isinstance(spec, dict):
+        raise ValueError("结算载荷必须是 JSON 对象")
+    archive = spec.get("archive")
+    if not isinstance(archive, dict):
+        archive = {}
+    if not str(archive.get("content", "") or "").strip():
+        for key in ("essay_content", "essay", "content"):
+            candidate = spec.get(key)
+            if candidate and str(candidate).strip():
+                archive["content"] = str(candidate)
+                break
+    if archive:
+        spec["archive"] = archive
+    return spec
+
+
+def _settle_snapshot_files(paths: dict) -> list:
+    """结算前快照本地可写资产，用于失败回滚。"""
+    snapshot = []
+    seen = set()
+    for key in SETTLE_SNAPSHOT_KEYS:
+        target = paths.get(key)
+        if not target:
+            continue
+        resolved = Path(target).resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            data = resolved.read_bytes() if resolved.exists() else None
+        except Exception:
+            data = None
+        snapshot.append((resolved, data))
+    return snapshot
+
+
+def _settle_restore_files(snapshot: list, archives_dir=None, pre_existing=None):
+    for target, data in snapshot:
+        try:
+            if data is None:
+                if target.exists():
+                    target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+        except Exception:
+            pass
+    if archives_dir is not None and pre_existing is not None:
+        try:
+            for f in Path(archives_dir).glob("*.md"):
+                if f.name not in pre_existing:
+                    f.unlink()
+        except Exception:
+            pass
+
+
+def _settle_preflight(spec: dict, paths: dict, task_id: str):
+    """结算前置校验：任何一项不通过都不得开始写入，杜绝"半写入 + 假成功"。"""
+    errors, warnings = [], []
+
+    batch = spec.get("batch")
+    if batch is not None and not isinstance(batch, dict):
+        errors.append("batch 段必须是 JSON 对象")
+        batch = None
+
+    archive = spec.get("archive") or {}
+    if not str(archive.get("content", "") or "").strip():
+        errors.append("缺少终版范文正文：请在载荷顶层提供 essay_content，或提供 archive.content")
+
+    if isinstance(batch, dict):
+        known_ids = []
+        for key in ("user_task1", "user_shared", "seed_task1", "shared"):
+            candidate = paths.get(key)
+            if candidate and Path(candidate).exists():
+                for rec in read_jsonl(candidate):
+                    if rec.get("id"):
+                        known_ids.append(str(rec["id"]).strip())
+        for upd in batch.get("status_updates", []) or []:
+            uid = str(upd.get("id", "")).strip()
+            if not uid:
+                errors.append("status_updates 中存在缺少 id 的条目")
+                continue
+            if not any(is_id_match(known, uid) for known in known_ids):
+                errors.append(f"status_updates 指定的条目不存在，无法晋级: {uid}")
+            if str(upd.get("status", "")).strip() not in MASTERY_RANK:
+                errors.append(f"status_updates 中 '{uid}' 的 status 非法: {upd.get('status')}")
+        for wrapper in batch.get("new_items", []) or []:
+            item = wrapper.get("data", wrapper) if isinstance(wrapper, dict) else {}
+            probe = dict(item)
+            if not probe.get("source"):
+                probe["source"] = f"{task_id} 实战沉淀" if task_id else "实战沉淀"
+            ok, reason = check_admission_rules(probe)
+            if not ok:
+                errors.append(f"new_items 未通过准入规则: {reason} | {item.get('intent', item.get('intent_cn', ''))}")
+
+    maimemo = spec.get("maimemo")
+    if maimemo is not None and not isinstance(maimemo, dict):
+        errors.append("maimemo 段必须是 JSON 对象")
+    elif isinstance(maimemo, dict) and maimemo.get("words"):
+        missing_spelling = [w.get("sentence", "") for w in maimemo["words"] if not str(w.get("spelling", "")).strip()]
+        if missing_spelling:
+            errors.append(f"maimemo.words 中有 {len(missing_spelling)} 张词卡缺少 spelling 字段")
+        no_sentence = [w.get("spelling") for w in maimemo["words"] if not str(w.get("sentence", "")).strip()]
+        if no_sentence:
+            warnings.append(f"以下词卡缺少例句，将不生成专属例句: {', '.join(str(x) for x in no_sentence)}")
+
+    return errors, warnings
+
+
+def cmd_settle(args):
+    """
+    Transaction-like one-stop settlement command:
+    Processes batch-update, archive, maimemo-sync, and verify in a single step.
+    """
+    if getattr(args, "example", False):
+        example_payload = {
+            "task_id": "T2012-E2-ADV",
+            "genre": "complaint",
+            "year": "2012",
+            "exam_type": "English II",
+            "title": "投诉网购电子词典（2012英二）",
+            # 顶层 essay_content 为文档化主形态；archive.content 亦被兼容
+            "essay_content": "Dear Sir or Madam,\n\n    I am writing to lodge a formal complaint regarding the electronic dictionary that I purchased from your online store on September 20th.\n\n                                        Yours faithfully,\n                                        Zhang Wei\n",
+            "archive": {
+                "metadata": {
+                    "signature": "Zhang Wei",
+                    "word_count": 117,
+                    "points_coverage": "100%",
+                    "advanced_patterns": ["Having done", "which-clause", "be justified in doing"]
+                }
+            },
+            "batch": {
+                "status_updates": [
+                    {
+                        "id": "T1_ADV_SEN_001",
+                        "status": "敢用",
+                        "note": "跨文类复用验证（ID 必须取自 query --mine 的真实输出）",
+                        "independent": True
+                    }
+                ],
+                "new_items": [
+                    {
+                        "target": "shared",
+                        "data": {
+                            "category": "phrase",
+                            "genre": "complaint",
+                            "section": "body",
+                            "register": "neutral_formal",
+                            "intent": "提供建设性的解决方案（售后交涉、回复信、建议信通用的举措承重表达）",
+                            "verb_phrase": "offer a constructive solution",
+                            "expression": "offer a constructive solution",
+                            "mastery": "学习中"
+                        }
+                    },
+                    {
+                        "target": "task1",
+                        "data": {
+                            "category": "functional_sentence",
+                            "genre": "complaint",
+                            "section": "opening",
+                            "register": "neutral_formal",
+                            "intent": "投诉信开篇定调：一句话交代投诉意图、商品、购买渠道与购买时间四要素",
+                            "expression": "I am writing to lodge a formal complaint regarding [Product] that I purchased from [Place] on [Date].",
+                            "mastery": "敢用"
+                        }
+                    }
+                ]
+            },
+            "maimemo": {
+                "chapter": "2012英二小作文",
+                "words": [
+                    {
+                        "spelling": "express",
+                        "type": "spelling_fix",
+                        "misspelling": "expree",
+                        "sentence": "I am writing to express my dissatisfaction with the electronic dictionary.",
+                        "translation": "我写信是为了表达我对电子词典的不满。",
+                        "usage_note": "考研高频动词，表表达情感或立场",
+                        "grammar_note": "不定式作目的状语"
+                    }
+                ]
+            }
+        }
+        print(json.dumps(example_payload, indent=2, ensure_ascii=False))
+        return
+
+    raw_data = getattr(args, "data", None)
+    if not raw_data and getattr(args, "file", None):
+        with open(args.file, "r", encoding="utf-8") as f:
+            raw_data = f.read()
+    elif not raw_data:
+        raw_data = sys.stdin.read()
+
+    if not raw_data or not raw_data.strip():
+        print("错误: 必须通过 --file 指定 JSON 载荷文件路径，或使用 --data / stdin，或使用 --example 查看样例", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        settle_spec = _load_settle_payload(raw_data)
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] 结算载荷 JSON 格式错误: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+
+    paths = get_paths()
+    task_id = settle_spec.get("task_id", "") or f"T{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
+    genre = normalize_genre(settle_spec.get("genre", "general"))
+    year = str(settle_spec.get("year", datetime.datetime.now().year))
+    exam_type = normalize_exam_type(settle_spec.get("exam_type"), default="考研小作文")
+    title = settle_spec.get("title", f"{year} {exam_type} 满分范文")
+
+    settle_report = {
+        "status": "success",
+        "task_id": task_id,
+        "batch": None,
+        "archive": None,
+        "maimemo": None,
+        "verify": None,
+        "errors": [],
+        "warnings": [],
+    }
+
+    print("==================== 考研英语小作文 · 阶段3一键沉淀结算 ====================")
+    print(f"• 任务编号: {task_id} | 题目标题: {title} ({year} · {exam_type} · {genre})")
+
+    import types
+
+    # 0. 前置校验（不通过则零写入直接退出）
+    preflight_errors, preflight_warnings = _settle_preflight(settle_spec, paths, task_id)
+    for w in preflight_warnings:
+        print(f"  [WARN] {w}", file=sys.stderr)
+    settle_report["warnings"] = preflight_warnings
+    if preflight_errors:
+        print("\n--- [步骤 0/4] 结算前置校验 ---")
+        for item in preflight_errors:
+            print(f"  ✗ {item}", file=sys.stderr)
+        settle_report["status"] = "invalid"
+        settle_report["errors"] = preflight_errors
+        print("\n==================== 结算总结卡片 ====================")
+        print("[FAIL] 前置校验未通过，本次未做任何写入，请修正载荷后重试。", file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps(settle_report, ensure_ascii=False, indent=2))
+        sys.exit(2)
+
+    snapshot = _settle_snapshot_files(paths)
+    archives_dir = paths.get("archives")
+    pre_archives = set()
+    if archives_dir and Path(archives_dir).exists():
+        pre_archives = {f.name for f in Path(archives_dir).glob("*.md")}
+
+    local_failures = []
+    remote_failures = []
+
+    # 1. Batch update
+    batch_spec = settle_spec.get("batch")
+    if batch_spec:
+        batch_args = types.SimpleNamespace(
+            data=json.dumps(batch_spec, ensure_ascii=False),
+            file=None,
+            task_id=task_id,
+            example=False
+        )
+        print("\n--- [步骤 1/4] 执行外脑双仓入库 (batch-update) ---")
+        try:
+            batch_result = cmd_batch_update(batch_args) or {}
+        except SystemExit as e:
+            batch_result = {"error": f"batch-update exited with code {e.code}"}
+        settle_report["batch"] = batch_result
+        if batch_result.get("error"):
+            local_failures.append(batch_result["error"])
+        if batch_result.get("status_updates_unmatched"):
+            local_failures.append(f"掌握度晋级未命中条目: {', '.join(batch_result['status_updates_unmatched'])}")
+        if batch_result.get("status_updates_invalid"):
+            local_failures.append(f"掌握度晋级载荷非法: {', '.join(batch_result['status_updates_invalid'])}")
+        if batch_result.get("new_items_rejected"):
+            local_failures.append(f"新条目被准入规则拒绝 {len(batch_result['new_items_rejected'])} 条")
+    else:
+        print("\n--- [步骤 1/4] 外脑双仓入库: 载荷未提供 batch 段，已跳过 ---")
+        settle_report["batch"] = {"status": "skipped", "message": "no batch section"}
+
+    # 2. Archive
+    archive_spec = settle_spec.get("archive")
+    if archive_spec and str(archive_spec.get("content", "") or "").strip():
+        arch_content = str(archive_spec.get("content")).strip()
+        arch_meta = archive_spec.get("metadata", {}) or {}
+        arch_args = types.SimpleNamespace(
+            title=title,
+            genre=genre,
+            year=year,
+            exam_type=exam_type,
+            task_id=task_id,
+            content=arch_content,
+            file=None,
+            metadata=json.dumps(arch_meta, ensure_ascii=False) if arch_meta else None,
+            metadata_file=None,
+            example=False,
+            force=False,
+        )
+        print("\n--- [步骤 2/4] 执行范文与台账归档 (archive) ---")
+        try:
+            archived_path = cmd_archive(arch_args)
+            settle_report["archive"] = {
+                "status": "success",
+                "path": str(archived_path),
+                "title": title,
+                "genre": genre,
+                "year": year,
+                "exam_type": exam_type,
+                "word_count": arch_meta.get("word_count"),
+            }
+        except SystemExit as e:
+            local_failures.append(f"范文归档失败 (archive exited with code {e.code})")
+            settle_report["archive"] = {"status": "error", "message": f"archive exited with code {e.code}"}
+    else:
+        print("\n--- [步骤 2/4] 范文归档: 载荷缺少归档正文，已跳过 ---")
+        settle_report["archive"] = {"status": "skipped", "message": "no archive content"}
+
+    # 3. MaiMemo Sync
+    memo_spec = settle_spec.get("maimemo")
+    if memo_spec and memo_spec.get("words"):
+        print("\n--- [步骤 3/4] 执行墨墨背单词专属词本同步 (maimemo-sync) ---")
+        try:
+            try:
+                from maimemo_sync import sync_essay_vocabulary
+            except ImportError:
+                script_dir = Path(__file__).resolve().parent
+                if str(script_dir) not in sys.path:
+                    sys.path.insert(0, str(script_dir))
+                from maimemo_sync import sync_essay_vocabulary
+
+            memo_payload = {
+                "chapter": memo_spec.get("chapter", f"{year}{exam_type}小作文"),
+                "task_id": task_id,
+                "words": memo_spec.get("words", [])
+            }
+            token = getattr(args, "token", None) or os.environ.get("MAIMEMO_TOKEN")
+            is_mock = getattr(args, "mock", False)
+            is_dry_run = getattr(args, "dry_run", False)
+
+            if not token and not is_mock and not is_dry_run:
+                print("  [WARN] 未检测到 MAIMEMO_TOKEN 环境变量，已跳过墨墨背单词自动同步。", file=sys.stderr)
+                settle_report["maimemo"] = {"status": "skipped", "message": "MAIMEMO_TOKEN not set"}
+            else:
+                res = sync_essay_vocabulary(memo_payload, token=token, mock=is_mock, dry_run=is_dry_run)
+                settle_report["maimemo"] = res
+                if res.get("status") == "success":
+                    print(f"  [OK] 专属词本: 《{res.get('notepad_title')}》 ➔ 章节 # {res.get('chapter')}")
+                    print(f"  [OK] 同步生词: {', '.join(res.get('synced_words', []))}")
+                    print(f"  [OK] 专属例句沉淀数: {res.get('phrases_created')} 条 | 借壳助记数: {res.get('notes_created')} 条")
+                    print("  [OK] 今日复习流: 已直接注入 (advance=True)")
+                    if res.get("skipped_words"):
+                        print(f"  [WARN] 未匹配跳过词: {', '.join(res.get('skipped_words'))}", file=sys.stderr)
+                else:
+                    remote_failures.append(f"墨墨同步未成功（status={res.get('status')}）: {res.get('message')}")
+                    print(f"  [FAIL] 墨墨同步失败: {res.get('message')}", file=sys.stderr)
+                    if res.get("skipped_words"):
+                        print(f"  [FAIL] 未匹配跳过词: {', '.join(res.get('skipped_words'))}", file=sys.stderr)
+        except Exception as e:
+            print(f"  [FAIL] 墨墨同步执行发生异常: {e}", file=sys.stderr)
+            settle_report["maimemo"] = {"status": "error", "message": str(e)}
+            remote_failures.append(f"墨墨同步异常: {e}")
+    else:
+        print("\n--- [步骤 3/4] 墨墨背单词专属词本同步: 未配置或生词列表为空，已跳过 ---")
+        settle_report["maimemo"] = {"status": "skipped", "message": "No words provided"}
+
+    # 4. Verify integrity
+    print("\n--- [步骤 4/4] 校验知识库外脑一致性 (verify) ---")
+    has_error, total_valid = verify_integrity(paths, verbose=True)
+    settle_report["verify"] = {
+        "passed": not has_error,
+        "total_valid_entries": total_valid
+    }
+    if has_error:
+        local_failures.append("结算后知识库一致性校验未通过")
+
+    print("\n==================== 结算总结卡片 ====================")
+
+    # 本地写入链路失败 -> 整体回滚，保证"要么全成功，要么零变化"
+    if local_failures:
+        _settle_restore_files(snapshot, archives_dir, pre_archives)
+        settle_report["status"] = "error"
+        settle_report["errors"] = local_failures
+        print("[FAIL] 本地沉淀链路失败，已整体回滚（个人外脑 / 台账 / history.log / 新归档均恢复原状）:", file=sys.stderr)
+        for item in local_failures:
+            print(f"  ✗ {item}", file=sys.stderr)
+        print("======================================================")
+        if getattr(args, "json", False):
+            print(json.dumps(settle_report, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    print("✔ 外脑双仓入库完成")
+    print("✔ 范文归档与题目台账登记完成")
+    memo_status = (settle_report["maimemo"] or {}).get("status")
+    if memo_status == "success":
+        print("✔ 墨墨背单词专属词本同步成功 (已注入今日复习流)")
+    elif memo_status == "skipped":
+        print(f"○ 墨墨背单词同步跳过 ({(settle_report['maimemo'] or {}).get('message')})")
+    else:
+        print("✗ 墨墨背单词同步未完成（本地沉淀已保留，可稍后单独重试墨墨同步）")
+    print(f"✔ 知识库一致性校验通过 (有效总条目: {total_valid} 条)")
+    print("======================================================")
+
+    if remote_failures:
+        # 远端同步失败不回滚本地成果，但必须以非零退出码与显式 ✗ 告知，杜绝假成功
+        settle_report["status"] = "partial"
+        settle_report["errors"] = remote_failures
+        for item in remote_failures:
+            print(f"  ✗ {item}", file=sys.stderr)
+        print("  [提示] 本地知识库与归档已落盘，仅墨墨词本同步未完成；可修正后用 `maimemo-sync` 单独重试。", file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps(settle_report, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        print(json.dumps(settle_report, ensure_ascii=False, indent=2))
 
 def main():
     parser = argparse.ArgumentParser(description="Kaoyan Writing KB Manager")
@@ -2496,6 +3320,8 @@ def main():
     p_query.add_argument("--section", type=str, default=None, help="Filter by section (opening, body, closing)")
     p_query.add_argument("--limit", type=int, default=5, help="Max items to return (default: 5)")
     p_query.add_argument("--type", type=str, default="all", choices=["all", "task1", "shared"], help="Knowledge domain")
+    p_query.add_argument("--mine", action="store_true", help="个人外脑全量检索（跨文类召回，阶段1【外脑连接】专用）")
+    p_query.add_argument("--match-file", type=str, default=None, help="与 --mine 搭配：传入初稿文件，返回已被初稿命中的外脑资产")
     p_query.add_argument("--json", action="store_true", help="Output as JSON")
 
     # append
@@ -2600,6 +3426,7 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_arch.add_argument("--file", type=str, default=None, help="File containing markdown content")
     p_arch.add_argument("--metadata", type=str, default=None, help="JSON string with metadata")
     p_arch.add_argument("--metadata-file", type=str, default=None, help="File containing JSON metadata")
+    p_arch.add_argument("--force", action="store_true", help="Allow duplicate ledger rows (default: upsert by task_id)")
     p_arch.add_argument("--example", action="store_true", help="Print archive command usage example and exit")
 
     # session
@@ -2619,6 +3446,9 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_check.add_argument("--text", type=str, default=None, help="Essay text content")
     p_check.add_argument("--file", type=str, default=None, help="File containing essay text")
     p_check.add_argument("--genre", type=str, default="letter", help="Essay genre (default: letter)")
+    p_check.add_argument("--year", type=str, default=None, help="Exam year: look up the mandated signature from anchors for verification")
+    p_check.add_argument("--exam-type", type=str, default=None, help="Exam type (1/2/英一/英二/English I/English II) for signature verification")
+    p_check.add_argument("--signoff", type=str, default=None, help="Expected signature name (overrides --year/--exam-type lookup)")
     p_check.add_argument("--json", action="store_true", help="Output as JSON")
 
     # verify
@@ -2632,6 +3462,16 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_memo.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
     p_memo.add_argument("--example", action="store_true", help="Print payload template and exit")
     p_memo.add_argument("--json", action="store_true", help="Output result as pure JSON")
+
+    # settle
+    p_settle = subparsers.add_parser("settle", help="Atomic settlement: batch update KB, archive essay, sync MaiMemo, verify integrity")
+    p_settle.add_argument("--file", type=str, default=None, help="Path to settle JSON file")
+    p_settle.add_argument("--data", type=str, default=None, help="Raw JSON string for settlement")
+    p_settle.add_argument("--token", type=str, default=None, help="MaiMemo API token")
+    p_settle.add_argument("--dry-run", action="store_true", help="Dry run without modifying external remote APIs")
+    p_settle.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
+    p_settle.add_argument("--example", action="store_true", help="Print sample settle JSON and exit")
+    p_settle.add_argument("--json", action="store_true", help="Output result as pure JSON")
 
     args = parser.parse_args()
     if args.command == "init":
@@ -2662,6 +3502,8 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
         cmd_verify(args)
     elif args.command == "maimemo-sync":
         cmd_maimemo_sync(args)
+    elif args.command == "settle":
+        cmd_settle(args)
 
 if __name__ == "__main__":
     main()

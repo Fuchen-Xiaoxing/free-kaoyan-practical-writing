@@ -32,16 +32,22 @@ MAIMEMO_BASE_URL = "https://open.maimemo.com/open/api/v1"
 DEFAULT_NOTEPAD_TITLE = "我的考研作文"
 DEFAULT_NOTEPAD_BRIEF = "考研英语小作文实战生词与错词集"
 
+# 官方频控契约（references/maimemo_api.md）：20 次/10 秒、40 次/60 秒、2000 次/5 小时
+RATE_LIMITS = ((20, 10.0), (40, 60.0), (2000, 5 * 3600.0))
+MIN_CALL_GAP = 0.5  # 20 次/10 秒 ⇒ 平均 0.5 秒一次，留出安全余量
+
+
 def find_word_highlight_ranges(sentence: str, spelling: str) -> list:
     """
     Calculate character offset [start, end) for target spelling in sentence.
-    Handles case-insensitivity, common inflections, and fallbacks.
+    Handles case-insensitivity, common inflections. Returns [] when the target
+    word is absent: 绝不回落高亮句首，避免给学生错误的"目标词位置"。
     """
     if not sentence or not spelling:
-        return [{"start": 0, "end": 0}]
+        return []
 
     clean_spelling = spelling.strip()
-    
+
     # 1. Exact boundary match (case-insensitive)
     pattern = rf"\b{re.escape(clean_spelling)}\b"
     matches = list(re.finditer(pattern, sentence, re.IGNORECASE))
@@ -58,7 +64,7 @@ def find_word_highlight_ranges(sentence: str, spelling: str) -> list:
             stem = clean_spelling[:-2]
         elif clean_spelling.endswith("ing"):
             stem = clean_spelling[:-3]
-    
+
     inflection_pattern = rf"\b{re.escape(stem)}[a-zA-Z]*\b"
     matches = list(re.finditer(inflection_pattern, sentence, re.IGNORECASE))
     if matches:
@@ -70,8 +76,8 @@ def find_word_highlight_ranges(sentence: str, spelling: str) -> list:
     if idx != -1:
         return [{"start": idx, "end": idx + len(clean_spelling)}]
 
-    # 4. Fallback to start of sentence
-    return [{"start": 0, "end": min(len(clean_spelling), len(sentence))}]
+    # 4. 未命中：返回空列表，由调用方决定不带 highlight 建句或跳过
+    return []
 
 
 def update_notepad_content(existing_content: str, chapter_name: str, new_words: list) -> str:
@@ -169,14 +175,26 @@ class MaimemoClient:
         self.mock = mock
         self.dry_run = dry_run
         self.last_req_time = 0.0
+        self._call_times = []
 
     def _throttle(self):
-        """Ensure safe rate limit (wait at least 0.25s between write calls)"""
+        """滑动窗口限流：严格执行 20 次/10 秒、40 次/60 秒、2000 次/5 小时。"""
         now = time.time()
-        elapsed = now - self.last_req_time
-        if elapsed < 0.25:
-            time.sleep(0.25 - elapsed)
-        self.last_req_time = time.time()
+        five_hours = 5 * 3600.0
+        self._call_times = [t for t in self._call_times if now - t < five_hours]
+        for limit, window in RATE_LIMITS:
+            while True:
+                recent = [t for t in self._call_times if now - t < window]
+                if len(recent) < limit:
+                    break
+                sleep_for = window - (now - min(recent)) + 0.05
+                time.sleep(max(0.05, sleep_for))
+                now = time.time()
+        if self._call_times and now - self._call_times[-1] < MIN_CALL_GAP:
+            time.sleep(MIN_CALL_GAP - (now - self._call_times[-1]))
+            now = time.time()
+        self._call_times.append(now)
+        self.last_req_time = now
 
     def request(self, method: str, path: str, body: dict = None) -> dict:
         """Execute HTTP request against MaiMemo Open API"""
@@ -228,48 +246,64 @@ class MaimemoClient:
         except urllib.error.URLError as e:
             raise RuntimeError(f"MaiMemo API 网络连接失败: {e.reason}")
 
+    @staticmethod
+    def _unwrap_data(resp: dict) -> dict:
+        """Unwrap 'data' payload from MaiMemo Open API response if present."""
+        if isinstance(resp, dict) and "data" in resp and isinstance(resp["data"], dict):
+            return resp["data"]
+        return resp
+
     def _mock_response(self, method: str, path: str, body: dict = None) -> dict:
-        """Provide deterministic mock responses for offline unit tests"""
+        """Provide deterministic mock responses for offline unit tests (aligned with real API data wrapping)"""
         if path == "/vocabulary/query":
             spellings = (body or {}).get("spellings", [])
             voc_list = [{"id": f"voc_mock_{w}", "spelling": w} for w in spellings]
-            return {"voc": voc_list}
+            return {"success": True, "data": {"voc": voc_list}, "errors": []}
         elif path.startswith("/notepads") and method == "GET":
             if path == "/notepads?limit=50&offset=0":
                 return {
-                    "notepads": [
-                        {
+                    "success": True,
+                    "data": {
+                        "notepads": [
+                            {
+                                "id": "np_mock_1",
+                                "title": DEFAULT_NOTEPAD_TITLE,
+                                "brief": DEFAULT_NOTEPAD_BRIEF,
+                                "tags": ["考研"],
+                                "status": "PUBLISHED"
+                            }
+                        ]
+                    },
+                    "errors": []
+                }
+            else:
+                return {
+                    "success": True,
+                    "data": {
+                        "notepad": {
                             "id": "np_mock_1",
                             "title": DEFAULT_NOTEPAD_TITLE,
                             "brief": DEFAULT_NOTEPAD_BRIEF,
                             "tags": ["考研"],
+                            "content": "# 2010英一小作文\nsuggest\nrecommend",
                             "status": "PUBLISHED"
                         }
-                    ]
-                }
-            else:
-                return {
-                    "notepad": {
-                        "id": "np_mock_1",
-                        "title": DEFAULT_NOTEPAD_TITLE,
-                        "brief": DEFAULT_NOTEPAD_BRIEF,
-                        "tags": ["考研"],
-                        "content": "# 2010英一小作文\nsuggest\nrecommend",
-                        "status": "PUBLISHED"
-                    }
+                    },
+                    "errors": []
                 }
         elif path == "/notepads" and method == "POST":
-            return {"notepad": {"id": "np_mock_new", **(body.get("notepad", {}))}}
+            return {"success": True, "data": {"id": "np_mock_new", "notepad": {"id": "np_mock_new", **(body.get("notepad", {}))}}, "errors": []}
         elif path.startswith("/notepads/") and method == "POST":
-            return {"notepad": {"id": path.split("/")[-1], **(body.get("notepad", {}))}}
+            np_id = path.split("/")[-1]
+            return {"success": True, "data": {"id": np_id, "notepad": {"id": np_id, **(body.get("notepad", {}))}}, "errors": []}
         elif path == "/phrases" and method == "POST":
-            return {"phrase": {"id": "ph_mock_1", **(body.get("phrase", {}))}}
+            return {"success": True, "data": {"id": "ph_mock_1", "phrase": {"id": "ph_mock_1", **(body.get("phrase", {}))}}, "errors": []}
         elif path == "/notes" and method == "POST":
-            return {"note": {"id": "nt_mock_1", **(body.get("note", {}))}}
+            return {"success": True, "data": {"id": "nt_mock_1", "note": {"id": "nt_mock_1", **(body.get("note", {}))}}, "errors": []}
         elif path == "/study/add_words" and method == "POST":
             words = (body or {}).get("words", [])
-            return {"added_count": len(words)}
-        return {}
+            return {"success": True, "data": {"added_count": len(words)}, "errors": []}
+        return {"success": True, "data": {}, "errors": []}
 
     def query_vocabulary_ids(self, spellings: list) -> dict:
         """Batch query voc_id for a list of spellings. Returns {spelling.lower(): voc_id}."""
@@ -277,13 +311,15 @@ class MaimemoClient:
             return {}
         clean_spellings = list({s.strip() for s in spellings if s.strip()})
         resp = self.request("POST", "/vocabulary/query", {"spellings": clean_spellings})
-        voc_items = resp.get("voc", [])
+        data = self._unwrap_data(resp)
+        voc_items = data.get("voc", [])
         return {item["spelling"].lower(): item["id"] for item in voc_items if "spelling" in item and "id" in item}
 
     def sync_notepad(self, title: str, chapter: str, words: list) -> dict:
         """Create or update chapter in notepad 《我的考研作文》."""
         resp = self.request("GET", "/notepads?limit=50&offset=0")
-        notepads = resp.get("notepads", [])
+        data = self._unwrap_data(resp)
+        notepads = data.get("notepads", [])
         
         target_np = None
         for np in notepads:
@@ -304,12 +340,14 @@ class MaimemoClient:
                 }
             }
             res = self.request("POST", "/notepads", create_body)
-            return {"action": "created", "notepad": res.get("notepad", {})}
+            res_data = self._unwrap_data(res)
+            return {"action": "created", "notepad": res_data.get("notepad", res_data)}
         else:
             # Update existing notepad
             np_id = target_np["id"]
             detail = self.request("GET", f"/notepads/{np_id}")
-            existing_content = detail.get("notepad", {}).get("content", "")
+            detail_data = self._unwrap_data(detail)
+            existing_content = detail_data.get("notepad", {}).get("content", "") or detail_data.get("content", "")
             updated_content = update_notepad_content(existing_content, chapter, words)
             update_body = {
                 "notepad": {
@@ -321,23 +359,23 @@ class MaimemoClient:
                 }
             }
             res = self.request("POST", f"/notepads/{np_id}", update_body)
-            return {"action": "updated", "notepad": res.get("notepad", {})}
+            res_data = self._unwrap_data(res)
+            return {"action": "updated", "notepad": res_data.get("notepad", res_data)}
 
     def create_example_phrase(self, voc_id: str, sentence: str, translation: str, chapter: str, spelling: str) -> dict:
-        """Create custom example phrase with target word highlighted."""
+        """Create custom example phrase with target word highlighted (no highlight when absent)."""
         highlight = find_word_highlight_ranges(sentence, spelling)
         origin_str = f"{chapter}实战" if chapter else "考研作文实战"
-        body = {
-            "phrase": {
-                "voc_id": voc_id,
-                "phrase": sentence,
-                "interpretation": translation or "考研作文实战例句",
-                "tags": ["考研"],
-                "origin": origin_str,
-                "highlight": highlight
-            }
+        phrase_body = {
+            "voc_id": voc_id,
+            "phrase": sentence,
+            "interpretation": translation or "考研作文实战例句",
+            "tags": ["考研"],
+            "origin": origin_str,
         }
-        return self.request("POST", "/phrases", body)
+        if highlight:
+            phrase_body["highlight"] = highlight
+        return self.request("POST", "/phrases", {"phrase": phrase_body})
 
     def create_mnemonic_note(self, voc_id: str, note_text: str) -> dict:
         """Create mnemonic note with note_type: '语法'."""
@@ -358,7 +396,9 @@ class MaimemoClient:
             "words": [{"id": vid} for vid in voc_ids],
             "advance": advance
         }
-        return self.request("POST", "/study/add_words", body)
+        resp = self.request("POST", "/study/add_words", body)
+        data = self._unwrap_data(resp)
+        return data if isinstance(data, dict) else {"added_count": len(voc_ids)}
 
 
 def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, dry_run: bool = False) -> dict:
@@ -369,6 +409,17 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     words = payload.get("words", [])
     if not words:
         return {"status": "skipped", "message": "待同步生词列表为空，已跳过。"}
+
+    # 0. 载荷内去重：同一 spelling 只同步一次，避免重复建例句/助记
+    seen_spellings = set()
+    unique_words = []
+    for w in words:
+        sp = str(w.get("spelling", "")).strip().lower()
+        if not sp or sp in seen_spellings:
+            continue
+        seen_spellings.add(sp)
+        unique_words.append(w)
+    words = unique_words
 
     client = MaimemoClient(token=token, mock=mock, dry_run=dry_run)
 
@@ -400,6 +451,9 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     # 3. Create example phrases & 4. Create mnemonic notes
     phrase_count = 0
     note_count = 0
+    phrase_failures = []
+    note_failures = []
+    highlight_missing = []
     for w in matched_words:
         vid = w["voc_id"]
         spelling = w["spelling"]
@@ -408,12 +462,13 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
 
         # 3. Phrase creation
         if sentence:
+            if not find_word_highlight_ranges(sentence, spelling):
+                highlight_missing.append(spelling)
             try:
                 client.create_example_phrase(vid, sentence, translation, chapter, spelling)
                 phrase_count += 1
             except Exception as e:
-                # Non-fatal: phrase might already exist or slight format issue
-                pass
+                phrase_failures.append(f"{spelling}: {e}")
 
         # 4. Note creation
         note_text = format_mnemonic_note(w)
@@ -421,20 +476,38 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
             client.create_mnemonic_note(vid, note_text)
             note_count += 1
         except Exception as e:
-            pass
+            note_failures.append(f"{spelling}: {e}")
 
     # 5. Push words to study plan and immediate review
     vids = [w["voc_id"] for w in matched_words]
     study_res = client.add_to_today_review(vids, advance=True)
 
+    # 6. 部分失败显式化：绝不把"0 条例句"包装成 success
+    expected_phrases = len([w for w in matched_words if w.get("sentence")])
+    status = "success"
+    message = ""
+    if phrase_failures and phrase_count == 0 and expected_phrases > 0:
+        status = "partial_failed"
+        message = f"例句创建全部失败（{len(phrase_failures)} 条）：{'; '.join(phrase_failures[:3])}"
+    elif phrase_failures or note_failures:
+        message = (f"部分例句/助记创建失败：例句失败 {len(phrase_failures)} 条，"
+                   f"助记失败 {len(note_failures)} 条")
+        status = "partial_failed"
+
     return {
-        "status": "success",
+        "status": status,
+        "message": message,
         "notepad_title": DEFAULT_NOTEPAD_TITLE,
         "chapter": chapter,
+        "notepad_action": (np_res or {}).get("action"),
         "synced_words": [w["spelling"] for w in matched_words],
         "skipped_words": skipped_words,
         "phrases_created": phrase_count,
+        "phrases_failed": len(phrase_failures),
         "notes_created": note_count,
+        "notes_failed": len(note_failures),
+        "highlight_missing": highlight_missing,
+        "failure_details": (phrase_failures + note_failures)[:5],
         "study_advance": True,
         "added_count": study_res.get("added_count", len(vids))
     }
@@ -486,7 +559,21 @@ def main():
 
     try:
         res = sync_essay_vocabulary(payload, token=args.token, mock=args.mock, dry_run=args.dry_run)
-        if args.json:
+        if res.get("status") in ("partial_failed", "error"):
+            if args.json:
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(f"[ERROR] 墨墨同步失败: {res.get('message')}", file=sys.stderr)
+                if res.get("skipped_words"):
+                    print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}", file=sys.stderr)
+            sys.exit(1)
+        elif res.get("status") == "skipped":
+            if args.json:
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(f"[INFO] {res.get('message')}")
+            return
+        elif args.json:
             print(json.dumps(res, ensure_ascii=False, indent=2))
         else:
             print(f"=== 墨墨背单词同步完成 ===")
@@ -497,6 +584,8 @@ def main():
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
             print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
+            if res.get("highlight_missing"):
+                print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)
             print(f"今日复习流: 已推入 (advance=True)")
     except Exception as e:
         err_msg = str(e)

@@ -70,8 +70,12 @@ campus Wi-Fi infrastructure.
      | **朋友私人书信** (邀请信/感谢信/同侪) | `Dear XXX,` (如 `Dear John,` / `Dear Friends,`) | `Best wishes,` 或 `Kind regards,` (亦可用 `Best regards,`) | 【生死红线】：朋友私人信坚决严禁使用 `Yours sincerely,`（过于官僚扣得体度分） |
 4. **署名（靠右写）**：
    - **在结尾敬语的下一行，同样靠右对齐，首字母大写**；
-   - **考纲指定唯一合法署名：`Li Ming`**（不得写本人真实姓名，不得自创 Peter 等名字）；
-   - **署名末尾【坚决禁止加句号】**（如写成 `Li Ming.` 属于严重标点硬伤扣分）。
+   - **署名一律以题干 Directions 为准（`prompt` 命令输出的【官方指定署名】）**：题干明文给出替代署名时必须使用该署名，不得写本人真实姓名，也不得自创 `Peter` 等名字；
+   - **真题实例（已核校内置标尺）**：`2010 / 2011 / 2012 英二` 为 `Zhang Wei`；`2010 英一通知` 为 `Postgraduates' Association`；其余绝大多数年份为 `Li Ming`；通知/告示类统一署机构；
+   - 题干确实未给出任何署名要求时，才统一使用 `Li Ming`；
+   - **署名末尾【坚决禁止加句号】**（如写成 `Li Ming.` / `Zhang Wei.` 属于严重标点硬伤扣分）；
+   - 严禁收件人与署名重名（如 `Dear Li Ming,` 却落款 `Li Ming`）；
+   - 机器校验：`check-essay --file ... --year <年份> --exam-type <卷别>` 会直接报出"题干法定署名不一致 / 署名误加句号 / 收件人与署名重名 / 敬语与称呼不匹配"。
 
 ---
 
@@ -108,18 +112,18 @@ volunteer@university.edu.cn prior to May 18th.
 
 Date: May 12th, 2025
 Place: Room 204, Student Center
-Present: Li Ming, Zhang Wei, and 6 team members
+Present: Chen Hao, Zhao Lei, and 6 team members
 Absent: Liu Tao (due to internship interview)
 Subject: Preparations for the Campus Charity Bazaar
 
-    The meeting commenced at 3:00 p.m. with Li Ming presiding over the discussion. The
+    The meeting commenced at 3:00 p.m. with Chen Hao presiding over the discussion. The
 core resolutions reached are summarized as follows.
     Firstly, regarding venue allocation, it was agreed that the central playground will
-be designated as the primary bazaar area. Secondly, in terms of publicity, Zhang Wei was
+be designated as the primary bazaar area. Secondly, in terms of publicity, Zhao Lei was
 assigned to launch social media campaigns within three days.
     The meeting adjourned at 4:30 p.m. with all agendas concluded.
 
-                                                    Recorder: Li Ming
+                                                    Recorder: Chen Hao
 ```
 
 #### 视觉生死线：
@@ -131,7 +135,7 @@ assigned to launch social media campaigns within three days.
    - `Absent:` 缺席人员及合理事由（如 `due to illness` / `on business trip`）；
    - `Subject:` 会议议题（实词首字母大写）；
 3. **正文两段式**：第一段交待开启时间与主持人，第二段结构化汇报核心决议与分工；
-4. **落款**：右下角注明记录人：`Recorder: Li Ming`。
+4. **落款**：右下角注明记录人，如 `Recorder: Chen Hao`（记录人姓名沿用示例人名，**不要与考试法定署名占位符 `Li Ming`/`Zhang Wei` 混用**，以免与题干署名要求冲突）。
 
 ---
 
@@ -141,7 +145,7 @@ assigned to launch social media campaigns within three days.
                               MEMORANDUM
 
 To: All Department Staff
-From: Li Ming, Project Coordinator
+From: Chen Hao, Project Coordinator
 Date: October 15th, 2025
 Subject: Adjustments to Office Recycling Guidelines
 
@@ -169,8 +173,9 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
      - [禁用] `it's` ➔ [规范] `it is`
 3. **零感叹号铁律**：
    - 考研公文考查理性、客观、专业的事务沟通，**全篇严禁出现感叹号（`!`）**，一律使用句号（`.`）。
-4. **唯一合法署名**：
-   - 必须且只能是 `Li Ming`，坚决不能加句号，严禁写成 `Liming`、`LiMing`、`Li-Ming`。
+4. **合法署名**：
+   - **以题干法定署名为准**（用 `prompt` 命令确认，如 2012 英二为 `Zhang Wei`，未指定时才用 `Li Ming`）；
+   - 坚决不能加句号，严禁写成 `Liming`、`LiMing`、`Li-Ming`，严禁与收件人重名。
 
 ---
 
@@ -200,14 +205,14 @@ Secondly, disposable plastic containers are strictly prohibited in meeting rooms
 4. **感叹号数**：= 0（全篇 0 个 !）；
 5. **超纲词数**：= 0（紧扣考纲核心动词短语）；
 6. **采分点覆盖率**：= 100%（逐条覆盖题干 Bullet Points）；
-7. **无中生有数**：= 0（零虚构未提示的技术参数/附件/日程）。
+7. **无中生有数**：= 0（**初稿事实继承 N 处；标尺细节延展 M 处，逐条列明来源**；零虚构未提示的技术参数/附件/日程）。
 
 ### 考场交卷前 60 秒自查清单：
 - [ ] **称呼格式**：靠左顶格书写，首字母大写，末尾必须加逗号 `,`（不要用冒号 `:`）
 - [ ] **段落缩进**：一般分为三段（目的、细节、收尾），每一段的第一行向内缩进 4 个英文字母（约两个汉字位置），段落之间坚决不空行
 - [ ] **结尾敬语**：单独占一行，整体靠右对齐（或与署名右对齐），首字母大写，末尾加逗号 `,`（知道姓名用 Yours sincerely,；不知姓名用 Yours faithfully,；朋友私人信必须用 Best wishes, 或 Kind regards,）
-- [ ] **署名格式**：在结尾敬语下一行同样靠右对齐，首字母大写落款 Li Ming，末尾绝无句号 `.`
-- [ ] **告示特例自查**：标题居中写 Notice/Announcement，日期写在标题下一行的右侧，正文坚决无称呼，结尾署名机构（绝不署名 Li Ming）
+- [ ] **署名格式**：在结尾敬语下一行同样靠右对齐，首字母大写，落款为**题干法定署名**（用 `prompt` 确认，如 2012 英二为 `Zhang Wei`；未指定才用 `Li Ming`），末尾绝无句号 `.`，且不与收件人重名
+- [ ] **告示特例自查**：标题居中写 Notice/Announcement，日期写在标题下一行的右侧，正文坚决无称呼，结尾署名机构（绝不署名 Li Ming/Zhang Wei）
 - [ ] **语言纯洁**：全文 0 处口语缩写（0 处 don't / can't / I'm）
 - [ ] **标点纯洁**：全文 0 处感叹号 `!`
 - [ ] **词数达标**：正文稳定在 100~120 词（约 10~12 行）
