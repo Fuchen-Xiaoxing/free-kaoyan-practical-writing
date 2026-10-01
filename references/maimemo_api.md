@@ -104,18 +104,9 @@
 ### 4. “借壳”写作深度助记 (`POST /notes`)
 - **作用**: 点开助记卡片不是网上的搞笑段子，而是考研写作用法与原句语法拆解。
 - **类型参数 (`note_type`)**: 统一固定为 `"语法"`。
-- **助记内容规范**:
-  - **初稿拼错词**:
-    ```
-    【初稿纠偏】：初稿误拼为 acommodate，正确拼写为 accommodate（考场务必防范拼写扣分）！
-    【考研写作用法】：考研高频动词，常接 students / needs，表示“迎合、容纳、迁就”，写作中可完美替换普通的 meet 或 help。
-    【原句语法剖析】：主干为 The library is expected to prolong opening hours；不定式短语 to accommodate students 作后置目的状语，有力承载举措价值。
-    ```
-  - **范文高阶生词**:
-    ```
-    【考研写作用法】：写作及阅读高频动词，及物动词常搭 opening hours / service / life，比 lengthen 或 extend 更加严谨书面。
-    【原句语法剖析】：在 be expected to 结构中充当动词不定式核心动词，形成动宾结构 prolong opening hours。
-    ```
+- **助记内容规范**（纯文本三段式，禁用 Markdown 标题）:
+  - **初稿拼错词**：`【初稿纠偏】：初稿误拼为 <错拼>，正确拼写为 <正拼>（考场务必防范拼写扣分）！` + `【考研写作用法】：词性、高频搭配、可替换的普通表达` + `【原句语法剖析】：作文原句的主干与修饰成分拆解`。
+  - **范文高阶生词**：`【考研写作用法】：及物性与高频搭配，说明比某常见词更严谨书面` + `【原句语法剖析】：该词在范文原句中所充当的成分与形成的搭配`。
 - **请求体**:
   ```json
   {
@@ -149,30 +140,9 @@
 
 > **常规业务只走 `settle`**：阶段 3 用户确认后，把 `maimemo` 段写进 `/tmp/settle.json`，由 `kb_manager.py settle --file /tmp/settle.json` 原子化提交，**严禁零散碎片化调用**。
 >
-> 下文的独立载荷形态**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `/tmp/maimemo_sync.json` 并执行 `kb_manager.py maimemo-sync --file /tmp/maimemo_sync.json`。该独立入口已被幂等化，重复执行不会产生重复词卡。
+> 独立载荷**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `/tmp/maimemo_sync.json` 并执行 `kb_manager.py maimemo-sync --file /tmp/maimemo_sync.json`。该独立入口已幂等化，重复执行不会产生重复词卡。
 
-```json
-{
-  "chapter": "2011英二小作文",
-  "task_id": "T2011-E2-ADV",
-  "words": [
-    {
-      "spelling": "accommodate",
-      "type": "spelling_fix",
-      "misspelling": "acommodate",
-      "sentence": "The library is expected to prolong opening hours to accommodate students.",
-      "translation": "图书馆预计将延长开放时间以方便/容纳学生。",
-      "usage_note": "考研高频动词，常接 students / needs，表示‘迎合、容纳、迁就’，写作中可完美替换普通的 meet 或 help。",
-      "grammar_note": "主干为 The library is expected to prolong opening hours；不定式短语 to accommodate students 作后置目的状语，有力承载举措价值。"
-    },
-    {
-      "spelling": "prolong",
-      "type": "advanced_vocab",
-      "sentence": "The library is expected to prolong opening hours to accommodate students.",
-      "translation": "图书馆预计将延长开放时间以方便/容纳学生。",
-      "usage_note": "写作及阅读高频动词，及物动词常搭 opening hours / service，比 lengthen 或 extend 更加严谨书面。",
-      "grammar_note": "在 be expected to 结构中充当动词不定式核心动词，形成动宾结构 prolong opening hours。"
-    }
-  ]
-}
-```
+**载荷字段**（与 SKILL.md §四 的 `settle` 载荷 `maimemo` 段完全一致，完整示例见该处；`maimemo-sync` 的顶层另加 `task_id`）：
+
+- `chapter`：章节名，如 `2011英二小作文`；
+- `words[]`：`spelling`（必填）、`type`（`spelling_fix` 或 `advanced_vocab`）、`misspelling`（纠偏卡必填）、`sentence`（作文原句，缺省则不出例句）、`translation`、`usage_note`（考研写作用法）、`grammar_note`（原句语法剖析）。

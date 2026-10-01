@@ -38,4 +38,3 @@ settle.lock
 *.tmp
 *.bak
 tmp/
-.perm_test

@@ -89,7 +89,7 @@
   `The event is scheduled to convene at [Time] on [Date] in [Venue]. Given your unique background in this domain, your presence would provide participants with invaluable perspectives. Following the main session, an interactive Q&A discussion will be incorporated.`
 - **尾段（2 句闭环）**：
   - *官方*：`We would be truly grateful if you could favor us with a reply confirming your availability by [Deadline].`
-  - *同侪*：`We would be thrilled if you could join us. Looking forward to our lively discussion!`
+  - *同侪*：`We would be thrilled if you could join us. Looking forward to our lively discussion.`
 
 ---
 
@@ -172,4 +172,4 @@
 - **次段（3 句承重）**：核心切入人物/举措 ➔ 分步骤具象展开 ➔ 视觉/多媒体辅助与排练
   `An effective starting point would be zeroing in on one iconic figure, such as [Figure], whose [Work] offers rich narrative material. Furthermore, you are expected to incorporate concise diagrams and slides to engage your audience. Lastly, conducting a timed rehearsal beforehand will significantly bolster your onstage confidence.`
 - **尾段（2 句闭环）**：确信报告圆满成功 + 提供预演演练支持
-  `I am confident that your presentation will turn out to be both informative and compelling. Feel free to let me know if you would like to practice with me beforehand. Best of luck!`
+  `I am confident that your presentation will turn out to be both informative and compelling. Feel free to let me know if you would like to practice with me beforehand. Best of luck.`

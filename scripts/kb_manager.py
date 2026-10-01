@@ -133,33 +133,6 @@ MASTERY_RANK = {
 
 VALID_CATEGORIES = {"word", "phrase", "sentence", "functional_sentence", "template", "structure", "morpheme"}
 VALID_STATUSES = {"active", "dormant", "retired"}
-VALID_REGISTERS = {"informal_peer", "neutral_formal", "formal_authority", "public_notice"}
-VALID_SECTIONS = {"opening", "body", "closing", "format", "any"}
-
-def test_writable_dir(target_path_str: str) -> bool:
-    """真实探测目录可写性（支持创建临时父目录并执行写入测试）
-
-    注意：本函数会真实建目录，仅供 init / --reset 等显式创建流程使用。
-    路径探测阶段必须改用 exists_writable_dir，避免"探测即建库"的副作用。
-    """
-    try:
-        p = Path(target_path_str)
-        if p.exists() and os.access(p, os.W_OK):
-            return True
-        parent = p
-        while parent and not parent.exists() and parent != parent.parent:
-            parent = parent.parent
-        # 避免在根目录（如 / 或 D:\）下直接滥建未知顶层目录，要求已存在父级至少有1级非根路径
-        if parent and parent.exists() and len(parent.parts) > 1:
-            p.mkdir(parents=True, exist_ok=True)
-            test_file = p / ".perm_test"
-            with open(test_file, "w", encoding="utf-8") as f:
-                f.write("1")
-            test_file.unlink(missing_ok=True)
-            return True
-    except Exception:
-        pass
-    return False
 
 def exists_writable_dir(target_path_str: str) -> bool:
     """零副作用探测：只接受"已存在且可写"的目录，绝不创建任何路径。
