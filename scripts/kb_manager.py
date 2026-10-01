@@ -1429,7 +1429,7 @@ def cmd_query(args):
             print_item(cnt, it)
             cnt += 1
     else:
-        print("  (参见文类标准 2-6-2 黄金视觉结构)")
+        print("  (本题暂无匹配的结构模板；按三段式组织：首段交代目的，次段展开举措，尾段收束表态)")
     print()
 
 def generate_item_id(target: str, item: dict, existing_records: list) -> str:
@@ -2737,7 +2737,7 @@ def cmd_check_essay(args):
     print(f"• 正文分段词数: {p_detail if p_detail else '未分段'}")
     print(f"• 正文总词数: {body_total} 词 (全篇含称呼落款: {total_words} 词)")
     print(f"• 词数安全判定: {wc_desc}")
-    print(f"• 视觉比例诊断: {ratio_str} (基准参考: 2-6-2 黄金视觉律)")
+    print(f"• 视觉比例诊断: {ratio_str} (各段词数占比，仅作分布参考)")
 
     if contractions_found:
         items_str = ", ".join(f"L{ln}: '{w}'" for ln, w in contractions_found)
@@ -3689,7 +3689,7 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_clean.add_argument("--apply", action="store_true", help="Apply cleanup recommendations")
 
     # check-essay
-    p_check = subparsers.add_parser("check-essay", help="Quick check essay word count, 2-6-2 ratio and 7 hard indicators")
+    p_check = subparsers.add_parser("check-essay", help="Quick check essay word count, paragraph ratio, contractions, exclamations, format and signature")
     p_check.add_argument("--text", type=str, default=None, help="Essay text content")
     p_check.add_argument("--file", type=str, default=None, help="File containing essay text")
     p_check.add_argument("--genre", type=str, default=None, help="Essay genre (optional; helps pin the mandated signature lookup)")
