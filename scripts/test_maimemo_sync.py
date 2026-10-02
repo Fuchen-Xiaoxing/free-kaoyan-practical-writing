@@ -247,15 +247,43 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         self.assertEqual(res["status"], "skipped")
 
     def test_missing_token_error_in_real_mode(self):
-        old_token = os.environ.pop("MAIMEMO_TOKEN", None)
+        old_token = os.environ.pop("MAIMEMO_SPELLING_TOKEN", None)
         try:
             client = MaimemoClient(token="", mock=False)
             with self.assertRaises(ValueError) as ctx:
                 client.request("GET", "/test")
-            self.assertIn("MAIMEMO_TOKEN 未设置", str(ctx.exception))
+            self.assertIn("MAIMEMO_SPELLING_TOKEN 未设置", str(ctx.exception))
         finally:
             if old_token is not None:
-                os.environ["MAIMEMO_TOKEN"] = old_token
+                os.environ["MAIMEMO_SPELLING_TOKEN"] = old_token
+
+    def test_env_spelling_token_resolution(self):
+        old_token = os.environ.get("MAIMEMO_SPELLING_TOKEN")
+        try:
+            os.environ["MAIMEMO_SPELLING_TOKEN"] = "test_spell_tok_12345"
+            client = MaimemoClient(token=None, mock=True)
+            self.assertEqual(client.token, "test_spell_tok_12345")
+        finally:
+            if old_token is not None:
+                os.environ["MAIMEMO_SPELLING_TOKEN"] = old_token
+            else:
+                os.environ.pop("MAIMEMO_SPELLING_TOKEN", None)
+
+    def test_maimemo_token_is_ignored_for_isolation(self):
+        """确保写作 Skill 绝不读取 MAIMEMO_TOKEN（阅读账号专用），保证账号物理隔离。"""
+        old_spell = os.environ.pop("MAIMEMO_SPELLING_TOKEN", None)
+        old_read = os.environ.get("MAIMEMO_TOKEN")
+        try:
+            os.environ["MAIMEMO_TOKEN"] = "reading_account_token_should_not_leak"
+            client = MaimemoClient(token=None, mock=True)
+            self.assertEqual(client.token, "")
+        finally:
+            if old_spell is not None:
+                os.environ["MAIMEMO_SPELLING_TOKEN"] = old_spell
+            if old_read is not None:
+                os.environ["MAIMEMO_TOKEN"] = old_read
+            else:
+                os.environ.pop("MAIMEMO_TOKEN", None)
 
     def test_duplicate_spellings_are_deduped(self):
         """同一 spelling 重复出现时只同步一次，避免重复建例句/助记。"""

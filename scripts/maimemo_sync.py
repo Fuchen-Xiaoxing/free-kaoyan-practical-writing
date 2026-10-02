@@ -187,7 +187,7 @@ class MaimemoClient:
     Lightweight, self-contained MaiMemo API Client with zero third-party dependencies.
     """
     def __init__(self, token: str = None, base_url: str = MAIMEMO_BASE_URL, mock: bool = False, dry_run: bool = False):
-        self.token = token if token is not None else os.environ.get("MAIMEMO_TOKEN", "")
+        self.token = token if token is not None else os.environ.get("MAIMEMO_SPELLING_TOKEN", "")
         self.base_url = base_url.rstrip("/")
         self.mock = mock
         self.dry_run = dry_run
@@ -220,8 +220,9 @@ class MaimemoClient:
 
         if not self.token:
             raise ValueError(
-                "MAIMEMO_TOKEN 未设置！请配置环境变量 MAIMEMO_TOKEN 或通过 --token 传入。\n"
-                "获取方式：墨墨背单词 App → 设置 → 开放 API 或打开 https://open.maimemo.com/open/api/v1/tokens/openapi 复制 Token。"
+                "MAIMEMO_SPELLING_TOKEN 未设置！小作文实战需连接【背单词拼写专用账号】。\n"
+                "请配置环境变量 MAIMEMO_SPELLING_TOKEN 或通过 --token 传入。\n"
+                "获取方式：使用拼写背单词账号登录墨墨背单词 App → 设置 → 开放 API 或打开 https://open.maimemo.com/open/api/v1/tokens/openapi 复制 Token。"
             )
 
         if self.dry_run and method != "GET":
@@ -556,7 +557,7 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
 def main():
     parser = argparse.ArgumentParser(description="MaiMemo Sync Engine for Kaoyan Practical Writing")
     parser.add_argument("--file", type=str, default=None, help="Path to JSON payload file")
-    parser.add_argument("--token", type=str, default=None, help="MaiMemo API token")
+    parser.add_argument("--token", type=str, default=None, help="MaiMemo API token (默认为环境变量 MAIMEMO_SPELLING_TOKEN)")
     parser.add_argument("--dry-run", action="store_true", help="Dry run without modifying remote MaiMemo data")
     parser.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
     parser.add_argument("--example", action="store_true", help="Print payload template and exit")

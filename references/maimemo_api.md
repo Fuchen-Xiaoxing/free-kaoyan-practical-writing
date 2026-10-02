@@ -7,11 +7,15 @@
 ## 一、基础配置与认证
 
 - **Base URL**: `https://open.maimemo.com/open/api/v1`
-- **认证方式**: HTTP 请求头 `Authorization: Bearer $MAIMEMO_TOKEN`
+- **认证方式**: HTTP 请求头 `Authorization: Bearer $MAIMEMO_SPELLING_TOKEN`
+- **账号隔离契约**:
+  - 本 Skill（考研小作文）专职服务【背单词拼写】，绑定**拼写背单词账号**，使用环境变量 **`$MAIMEMO_SPELLING_TOKEN`**；
+  - 考研英语阅读 Skill 保持独立，绑定**识记背单词账号**（只要求认识不要求拼写），使用环境变量 **`$MAIMEMO_TOKEN`**；
+  - 两者 Token 与账号完全物理隔离，本 Skill 绝不回退读取 `$MAIMEMO_TOKEN`，杜绝串号污染。
 - **Token 来源**:
-  - 手机 App: 墨墨背单词 → 设置 → 开放 API
-  - Web 端: 打开 `https://open.maimemo.com/open/api/v1/tokens/openapi` 登录后复制 Token
-- **Token 缺省处理**: 若未设置环境变量 `$MAIMEMO_TOKEN`，系统提示用户获取并配置，不阻断写作主流程。
+  - 手机 App: 使用【拼写背单词专用账号】登录墨墨背单词 → 设置 → 开放 API
+  - Web 端: 打开 `https://open.maimemo.com/open/api/v1/tokens/openapi` 登录该账号后复制 Token
+- **Token 缺省处理**: 若未设置环境变量 `$MAIMEMO_SPELLING_TOKEN`，系统提示用户获取并配置，不阻断写作主流程。
 - **频控限制 (Rate Limits)**:
   - 20 次 / 10 秒
   - 40 次 / 60 秒

@@ -3444,13 +3444,13 @@ def _settle_impl(args, state):
                 "task_id": task_id,
                 "words": memo_spec.get("words", [])
             }
-            token = getattr(args, "token", None) or os.environ.get("MAIMEMO_TOKEN")
+            token = getattr(args, "token", None) or os.environ.get("MAIMEMO_SPELLING_TOKEN")
             is_mock = getattr(args, "mock", False)
             is_dry_run = getattr(args, "dry_run", False)
 
             if not token and not is_mock and not is_dry_run:
-                print("  [WARN] 未检测到 MAIMEMO_TOKEN 环境变量，已跳过墨墨背单词自动同步。", file=sys.stderr)
-                settle_report["maimemo"] = {"status": "skipped", "message": "MAIMEMO_TOKEN not set"}
+                print("  [WARN] 未检测到 MAIMEMO_SPELLING_TOKEN 环境变量（写作小作文专用拼写账号），已跳过墨墨背单词自动同步。", file=sys.stderr)
+                settle_report["maimemo"] = {"status": "skipped", "message": "MAIMEMO_SPELLING_TOKEN not set"}
             else:
                 res = sync_essay_vocabulary(memo_payload, token=token, mock=is_mock, dry_run=is_dry_run)
                 settle_report["maimemo"] = res
@@ -3677,7 +3677,7 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     # maimemo-sync
     p_memo = subparsers.add_parser("maimemo-sync", help="Sync essay vocabulary to MaiMemo (墨墨背单词)")
     p_memo.add_argument("--file", type=str, default=None, help="Path to JSON payload file")
-    p_memo.add_argument("--token", type=str, default=None, help="MaiMemo API token")
+    p_memo.add_argument("--token", type=str, default=None, help="MaiMemo API token (默认为环境变量 MAIMEMO_SPELLING_TOKEN)")
     p_memo.add_argument("--dry-run", action="store_true", help="Dry run without modifying remote MaiMemo data")
     p_memo.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
     p_memo.add_argument("--example", action="store_true", help="Print payload template and exit")
@@ -3687,7 +3687,7 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_settle = subparsers.add_parser("settle", help="Atomic settlement: batch update KB, archive essay, sync MaiMemo, verify integrity")
     p_settle.add_argument("--file", type=str, default=None, help="Path to settle JSON file")
     p_settle.add_argument("--data", type=str, default=None, help="Raw JSON string for settlement")
-    p_settle.add_argument("--token", type=str, default=None, help="MaiMemo API token")
+    p_settle.add_argument("--token", type=str, default=None, help="MaiMemo API token (默认为环境变量 MAIMEMO_SPELLING_TOKEN)")
     p_settle.add_argument("--dry-run", action="store_true", help="Dry run without modifying external remote APIs")
     p_settle.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
     p_settle.add_argument("--example", action="store_true", help="Print sample settle JSON and exit")
