@@ -1571,6 +1571,130 @@ class TestKBManager(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_44_doctor_subcommand_diagnostics(self):
+        """doctor subcommand: verifies diagnostics without token, and mock-based API probes with JSON output."""
+        env_no_token = dict(os.environ)
+        env_no_token.pop("MAIMEMO_SPELLING_TOKEN", None)
+        env_no_token.pop("MAIMEMO_TOKEN", None)
+        env_no_token["KB_BUILTIN_ROOT"] = str(KB_ROOT)
+
+        # 1. Without token: passes with WARN on token, local KB checked
+        res = self.run_cmd(["doctor", "--json"], env=env_no_token)
+        self.assertEqual(res.returncode, 0, f"doctor without token should exit 0: {res.stderr}\n{res.stdout}")
+        self.assertIn("未配置 MAIMEMO_SPELLING_TOKEN", res.stdout)
+        json_start = res.stdout.index("{")
+        data = json.loads(res.stdout[json_start:])
+        self.assertTrue(data["local_kb"]["anchors_ok"])
+        self.assertTrue(data["local_kb"]["seed_shared_ok"])
+        self.assertTrue(data["local_kb"]["seed_task1_ok"])
+        self.assertFalse(data["maimemo"]["configured"])
+        self.assertTrue(data["ready"])
+
+        # 2. With mock token
+        res_mock = self.run_cmd(["doctor", "--token", "mock_tok_123456789", "--mock", "--json"], env=env_no_token)
+        self.assertEqual(res_mock.returncode, 0, f"doctor with mock token failed: {res_mock.stderr}")
+        json_start_mock = res_mock.stdout.index("{")
+        data_mock = json.loads(res_mock.stdout[json_start_mock:])
+        self.assertTrue(data_mock["maimemo"]["configured"])
+        self.assertEqual(data_mock["maimemo"]["notepads"]["status"], "PASS")
+        self.assertEqual(data_mock["maimemo"]["vocabulary"]["status"], "PASS")
+        self.assertEqual(data_mock["maimemo"]["notes"]["status"], "PASS")
+        self.assertEqual(data_mock["maimemo"]["phrases"]["status"], "PASS")
+        self.assertEqual(data_mock["maimemo"]["study_review"]["status"], "PASS")
+
+    def test_45_settle_recognizes_soft_success_and_relative_path_fallback(self):
+        """settle command: accepts relative file path in cwd, and treats maimemo soft_success as exit 0."""
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_soft_")
+        try:
+            env = self.init_isolated_brain(temp_dir)
+            payload = {
+                "task_id": "T2013-E2-NOTICE",
+                "title": "通知慈善义卖（2013英二）",
+                "genre": "notice",
+                "year": "2013",
+                "exam_type": "2",
+                "essay_content": (
+                    "Notice\n\n    A charity sale will be held on campus.\n\n"
+                    "                                        Postgraduates' Association\n"
+                ),
+                "batch": {"status_updates": [], "new_items": []},
+                "maimemo": {
+                    "chapter": "2013英二小作文",
+                    "words": [
+                        {
+                            "spelling": "necessities",
+                            "sentence": "Students are encouraged to donate daily necessities."
+                        }
+                    ]
+                }
+            }
+            # Write relative file in temp_dir
+            payload_file = Path(temp_dir) / "settle.json"
+            payload_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            # 1. Test relative path fallback via run_cmd with cwd=temp_dir
+            res = self.run_cmd(["settle", "--file", "settle.json", "--mock"], env=env, cwd=temp_dir)
+            self.assertEqual(res.returncode, 0, f"settle with relative path failed: {res.stderr}\n{res.stdout}")
+            self.assertIn("范文归档与题目台账登记完成", res.stdout)
+
+            # Verify archive exists
+            md_files = list(Path(temp_dir).rglob("*_notice_*.md"))
+            self.assertEqual(len(md_files), 1, f"expected 1 notice archive, got {md_files}")
+
+            # 2. In-process test: verify soft_success is recognized as exit 0 without errors
+            import types
+            import maimemo_sync
+            import kb_manager
+
+            orig_sync = maimemo_sync.sync_essay_vocabulary
+            def mock_soft_sync(*args, **kwargs):
+                return {
+                    "status": "soft_success",
+                    "message": "生词本与借壳助记已同步入库，专属例句因权限不足已安全跳过（软降级）",
+                    "notepad_title": "我的考研作文",
+                    "chapter": "2013英二小作文",
+                    "notepad_action": "update",
+                    "synced_words": ["necessities"],
+                    "already_synced_words": [],
+                    "skipped_words": [],
+                    "phrases_created": 0,
+                    "phrases_failed": 0,
+                    "phrases_unauthorized": True,
+                    "notes_created": 1,
+                    "notes_failed": 0,
+                    "highlight_missing": [],
+                    "failure_details": [],
+                    "study_advance": True,
+                    "added_count": 1,
+                    "remote_side_effects": {
+                        "notepad_updated": True,
+                        "review_pushed": True,
+                        "idempotent_retry": True
+                    }
+                }
+
+            maimemo_sync.sync_essay_vocabulary = mock_soft_sync
+            saved_env = dict(os.environ)
+            try:
+                os.environ["KB_BUILTIN_ROOT"] = env["KB_BUILTIN_ROOT"]
+                os.environ["KAOYAN_USER_BRAIN"] = env["KAOYAN_USER_BRAIN"]
+                os.environ.pop("KB_ROOT", None)
+                args = types.SimpleNamespace(
+                    file=str(payload_file), data=None, token="mock_tok",
+                    dry_run=False, mock=False, example=False, json=True
+                )
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    kb_manager.cmd_settle(args)
+                out = buf.getvalue()
+                self.assertIn("专属例句因 Token 权限跳过", out)
+            finally:
+                maimemo_sync.sync_essay_vocabulary = orig_sync
+                os.environ.clear()
+                os.environ.update(saved_env)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

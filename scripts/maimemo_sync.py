@@ -182,6 +182,35 @@ def format_mnemonic_note(word_data: dict) -> str:
     return "\n".join(parts)
 
 
+def get_lemma_candidates(word: str) -> list:
+    """Generate canonical lemma candidates for inflected words (plurals, past tense, gerunds)."""
+    w = word.strip().lower()
+    cands = []
+    if w.endswith("ies") and len(w) > 3:
+        cands.append(w[:-3] + "y")
+    elif w.endswith("es") and len(w) > 3:
+        cands.extend([w[:-2], w[:-1]])
+    elif w.endswith("s") and not w.endswith("ss") and len(w) > 2:
+        cands.append(w[:-1])
+    elif w.endswith("ed") and len(w) > 3:
+        if w.endswith("ied") and len(w) > 4:
+            cands.append(w[:-3] + "y")
+        cands.extend([w[:-1], w[:-2]])
+        if len(w) > 4 and w[-3] == w[-4]:
+            cands.append(w[:-3])
+    elif w.endswith("ing") and len(w) > 4:
+        cands.extend([w[:-3], w[:-3] + "e"])
+        if len(w) > 5 and w[-4] == w[-5]:
+            cands.append(w[:-4])
+    seen = set()
+    res = []
+    for c in cands:
+        if c and c != w and c not in seen:
+            seen.add(c)
+            res.append(c)
+    return res
+
+
 class MaimemoClient:
     """
     Lightweight, self-contained MaiMemo API Client with zero third-party dependencies.
@@ -278,7 +307,33 @@ class MaimemoClient:
             voc_list = [{"id": f"voc_mock_{w}", "spelling": w} for w in spellings]
             return {"success": True, "data": {"voc": voc_list}, "errors": []}
         elif path.startswith("/notepads") and method == "GET":
-            if path == "/notepads?limit=50&offset=0":
+            if "limit=" in path:
+                try:
+                    import urllib.parse
+                    parsed = urllib.parse.urlparse(path)
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    limit_val = int(qs.get("limit", [10])[0])
+                    if limit_val > 10:
+                        raise ValueError("MaiMemo API 请求失败 [400]: {\"errors\":[{\"code\":\"common_invalid_param\",\"msg\":\"Invalid parameters\",\"info\":\"property 'limit' must be <= 10\"}],\"success\":false}")
+                except ValueError as e:
+                    if "400" in str(e):
+                        raise
+            if path.startswith("/notepads/") and path != "/notepads":
+                return {
+                    "success": True,
+                    "data": {
+                        "notepad": {
+                            "id": "np_mock_1",
+                            "title": DEFAULT_NOTEPAD_TITLE,
+                            "brief": DEFAULT_NOTEPAD_BRIEF,
+                            "tags": ["考研"],
+                            "content": "# 2010英一小作文\nsuggest\nrecommend",
+                            "status": "PUBLISHED"
+                        }
+                    },
+                    "errors": []
+                }
+            else:
                 return {
                     "success": True,
                     "data": {
@@ -291,21 +346,6 @@ class MaimemoClient:
                                 "status": "PUBLISHED"
                             }
                         ]
-                    },
-                    "errors": []
-                }
-            else:
-                return {
-                    "success": True,
-                    "data": {
-                        "notepad": {
-                            "id": "np_mock_1",
-                            "title": DEFAULT_NOTEPAD_TITLE,
-                            "brief": DEFAULT_NOTEPAD_BRIEF,
-                            "tags": ["考研"],
-                            "content": "# 2010英一小作文\nsuggest\nrecommend",
-                            "status": "PUBLISHED"
-                        }
                     },
                     "errors": []
                 }
@@ -324,20 +364,59 @@ class MaimemoClient:
         return {"success": True, "data": {}, "errors": []}
 
     def query_vocabulary_ids(self, spellings: list) -> dict:
-        """Batch query voc_id for a list of spellings. Returns {spelling.lower(): voc_id}."""
+        """Batch query voc_id for a list of spellings with automatic lemmatization fallback.
+        Returns mapping of spelling.lower() -> voc_id.
+        """
         if not spellings:
             return {}
         clean_spellings = list({s.strip() for s in spellings if s.strip()})
         resp = self.request("POST", "/vocabulary/query", {"spellings": clean_spellings})
         data = self._unwrap_data(resp)
         voc_items = data.get("voc", [])
-        return {item["spelling"].lower(): item["id"] for item in voc_items if "spelling" in item and "id" in item}
+        mapping = {item["spelling"].lower(): item["id"] for item in voc_items if "spelling" in item and "id" in item}
+
+        # Check for unmatched words and attempt lemmatization fallback
+        unmatched = [s for s in clean_spellings if s.lower() not in mapping]
+        if unmatched:
+            lemma_map = {}
+            fallback_queries = []
+            for u in unmatched:
+                cands = get_lemma_candidates(u)
+                for cand in cands:
+                    if cand not in lemma_map:
+                        lemma_map[cand] = u.lower()
+                    fallback_queries.append(cand)
+            if fallback_queries:
+                fb_resp = self.request("POST", "/vocabulary/query", {"spellings": list(set(fallback_queries))})
+                fb_data = self._unwrap_data(fb_resp)
+                for item in fb_data.get("voc", []):
+                    sp_lower = item.get("spelling", "").lower()
+                    if sp_lower in lemma_map:
+                        orig = lemma_map[sp_lower]
+                        if orig not in mapping:
+                            mapping[orig] = item["id"]
+                    mapping[sp_lower] = item["id"]
+
+        return mapping
+
+    def _list_notepads(self) -> list:
+        """List all notepads with pagination (Open API enforces limit <= 10)."""
+        page_size = 10
+        notepads = []
+        offset = 0
+        while True:
+            resp = self.request("GET", f"/notepads?limit={page_size}&offset={offset}")
+            data = self._unwrap_data(resp)
+            batch = data.get("notepads", []) or []
+            notepads.extend(batch)
+            if len(batch) < page_size or offset >= 200:
+                break
+            offset += page_size
+        return notepads
 
     def sync_notepad(self, title: str, chapter: str, words: list) -> dict:
         """Create or update chapter in notepad 《我的考研作文》."""
-        resp = self.request("GET", "/notepads?limit=50&offset=0")
-        data = self._unwrap_data(resp)
-        notepads = data.get("notepads", [])
+        notepads = self._list_notepads()
         
         target_np = None
         for np in notepads:
@@ -485,6 +564,8 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     phrase_failures = []
     note_failures = []
     highlight_missing = []
+    phrases_unauthorized = False
+
     for w in to_create:
         vid = w["voc_id"]
         spelling = w["spelling"]
@@ -492,14 +573,19 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         translation = w.get("translation", "")
 
         # 3. Phrase creation
-        if sentence:
+        if sentence and not phrases_unauthorized:
             if not find_word_highlight_ranges(sentence, spelling):
                 highlight_missing.append(spelling)
             try:
                 client.create_example_phrase(vid, sentence, translation, chapter, spelling)
                 phrase_count += 1
             except Exception as e:
+                err_str = str(e)
                 phrase_failures.append(f"{spelling}: {e}")
+                if "403" in err_str or "permission_denied" in err_str.lower():
+                    # Circuit breaker: Token does not have /phrases permission.
+                    # Fast-fail for remaining words to avoid duplicate calls and log spam.
+                    phrases_unauthorized = True
 
         # 4. Note creation
         note_text = format_mnemonic_note(w)
@@ -514,19 +600,27 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     vids = [w["voc_id"] for w in to_create]
     study_res = client.add_to_today_review(vids, advance=True)
 
-    # 6. 部分失败显式化：绝不把"0 条例句"包装成 success
+    # 6. 部分失败与软降级判定：例句若因 403 权限未开通跳过，只要词本与助记成功即判定为 soft_success
     expected_phrases = len([w for w in to_create if w.get("sentence")])
     status = "success"
     message = ""
     if phrase_failures and phrase_count == 0 and expected_phrases > 0:
-        status = "partial_failed"
-        message = f"例句创建全部失败（{len(phrase_failures)} 条）：{'; '.join(phrase_failures[:3])}"
+        if phrases_unauthorized and (note_count > 0 or not to_create):
+            status = "soft_success"
+            message = "云词本与借壳助记已同步成功；专属例句已跳过（当前 Token 未开通 /phrases 权限）"
+        else:
+            status = "partial_failed"
+            message = f"例句创建全部失败（{len(phrase_failures)} 条）：{'; '.join(phrase_failures[:3])}"
     elif phrase_failures or note_failures:
-        message = (f"部分例句/助记创建失败：例句失败 {len(phrase_failures)} 条，"
-                   f"助记失败 {len(note_failures)} 条")
-        status = "partial_failed"
-    if already_synced and status == "success":
-        message = f"其中 {len(already_synced)} 词此前已同步，本次仅补建缺失卡片（幂等跳过）"
+        if phrases_unauthorized and not note_failures:
+            status = "soft_success"
+            message = "云词本与借壳助记已同步成功；专属例句已跳过（当前 Token 未开通 /phrases 权限）"
+        else:
+            message = (f"部分例句/助记创建失败：例句失败 {len(phrase_failures)} 条，"
+                       f"助记失败 {len(note_failures)} 条")
+            status = "partial_failed"
+    if already_synced and status in ("success", "soft_success"):
+        message += f"（其中 {len(already_synced)} 词此前已同步，本次幂等跳过）"
 
     return {
         "status": status,
@@ -539,6 +633,7 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         "skipped_words": skipped_words,
         "phrases_created": phrase_count,
         "phrases_failed": len(phrase_failures),
+        "phrases_unauthorized": phrases_unauthorized,
         "notes_created": note_count,
         "notes_failed": len(note_failures),
         "highlight_missing": highlight_missing,
@@ -595,7 +690,18 @@ def main():
     if not args.file:
         parser.error("必须通过 --file 指定 JSON 载荷文件路径，或使用 --example 查看样例")
 
-    with open(args.file, "r", encoding="utf-8") as f:
+    from pathlib import Path
+    target_file = Path(args.file).expanduser()
+    if not target_file.exists():
+        for alt in [Path("/var/minis/workspace/kaoyan") / target_file.name, Path("/var/minis/workspace") / target_file.name, Path.cwd() / target_file.name]:
+            if alt.exists():
+                target_file = alt
+                break
+    if not target_file.exists():
+        print(f"[ERROR] 指定文件不存在: {args.file}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(target_file, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
     try:
@@ -623,7 +729,10 @@ def main():
             print(f"同步生词: {', '.join(res.get('synced_words', []))}")
             if res.get('skipped_words'):
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
-            print(f"例句沉淀数: {res.get('phrases_created')}")
+            if res.get("phrases_unauthorized"):
+                print("例句沉淀数: 0 (Token 未授予 /phrases 权限，已软降级跳过)")
+            else:
+                print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
             if res.get("highlight_missing"):
                 print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)

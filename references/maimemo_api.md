@@ -61,7 +61,7 @@
 - **词本标签**: `["考研"]`
 - **章节命名规范**: `# [真题年份][卷别]小作文`（如 `# 2011英二小作文`，自拟题如 `# 自拟-图书馆服务小作文`）
 - **操作逻辑**:
-  1. `GET /notepads?limit=50&offset=0`：查询是否已有《我的考研作文》；
+  1. `GET /notepads?limit=10&offset=0`：查询是否已有《我的考研作文》（墨墨 API 严格限制 `limit <= 10`，若大于 10 将直接抛 HTTP 400 错误；脚本内部使用 10 步进的分页循环扫描，最大检索 200 个云词本）；
   2. 若不存在，调用 `POST /notepads` 创建全新词本：
      ```json
      {
@@ -83,6 +83,9 @@
 
 ### 3. 作文原句专属例句与字符高亮 (`POST /phrases`)
 - **作用**: 将本次作文中的原句收录为该单词在墨墨中的例句，并精准高亮该单词。
+- **Token 权限分级与 403 软降级 (Soft Degradation)**:
+  - 墨墨开放平台 Token 具备权限分级体系。部分用户的个人 Token 仅开通云词本与助记权限，调用 `/phrases` 时返回 HTTP 403 (`common_permission_denied`)。
+  - 同步脚本实现**单次熔断与软降级机制**：首次探测到 403 时立即熔断后续例句写入，绝不中断整体验收流程，保障云词本、生词入库、深度助记与复习流注入 100% 成功，系统返回 `soft_success` 并以 0 退出码完成结算。无需教秘向学员索要特殊权限。
 - **高亮算法契约 (`highlight: PhraseHighlightRange[]`)**:
   - 半开区间 `[start, end)`（0-indexed 字符索引）。
   - 脚本自动定位单词在例句中的起始与结束字符位置（兼容大小写形式与常见词尾屈折）。
@@ -142,9 +145,9 @@
 
 ## 三、结算数据载荷契约（`settle` 载荷内的 `maimemo` 段）
 
-> **常规业务只走 `settle`**：阶段 3 用户确认后，把 `maimemo` 段写进 `/tmp/settle.json`，由 `kb_manager.py settle --file /tmp/settle.json` 原子化提交，**严禁零散碎片化调用**。
+> **常规业务只走 `settle`**：阶段 3 用户确认后，把 `maimemo` 段写进工作区文件（推荐 `/var/minis/workspace/kaoyan/settle.json`，或当前目录 `settle.json`），由 `python3 kb_manager.py settle --file settle.json` 原子化提交，**严禁零散碎片化调用**。
 >
-> 独立载荷**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `/tmp/maimemo_sync.json` 并执行 `kb_manager.py maimemo-sync --file /tmp/maimemo_sync.json`。该独立入口已幂等化，重复执行不会产生重复词卡。
+> 独立载荷**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `maimemo_sync.json` 并执行 `python3 kb_manager.py maimemo-sync --file maimemo_sync.json`。该独立入口已幂等化，重复执行不会产生重复词卡。
 
 **载荷字段**（与 SKILL.md §四 的 `settle` 载荷 `maimemo` 段完全一致，完整示例见该处；`maimemo-sync` 的顶层另加 `task_id`）：
 

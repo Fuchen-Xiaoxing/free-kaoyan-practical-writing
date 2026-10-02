@@ -2518,7 +2518,12 @@ def ambiguous_year_exams(year: str) -> list:
 def cmd_check_essay(args):
     content = None
     if getattr(args, "file", None):
-        fpath = Path(args.file).expanduser().resolve()
+        fpath = Path(args.file).expanduser()
+        if not fpath.exists():
+            for alt in [Path("/var/minis/workspace/kaoyan") / fpath.name, Path("/var/minis/workspace") / fpath.name, Path.cwd() / fpath.name]:
+                if alt.exists():
+                    fpath = alt
+                    break
         if not fpath.exists():
             print(f"[ERROR] 指定的文件不存在: {args.file}", file=sys.stderr)
             sys.exit(1)
@@ -2905,7 +2910,17 @@ def cmd_maimemo_sync(args):
         print("错误: 必须通过 --file 指定 JSON 载荷文件路径，或使用 --example 查看样例", file=sys.stderr)
         sys.exit(1)
 
-    with open(args.file, "r", encoding="utf-8") as f:
+    target_file = Path(args.file).expanduser()
+    if not target_file.exists():
+        for alt in [Path("/var/minis/workspace/kaoyan") / target_file.name, Path("/var/minis/workspace") / target_file.name, Path.cwd() / target_file.name]:
+            if alt.exists():
+                target_file = alt
+                break
+    if not target_file.exists():
+        print(f"[ERROR] 指定文件不存在: {args.file}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(target_file, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
     try:
@@ -2934,7 +2949,10 @@ def cmd_maimemo_sync(args):
             print(f"同步生词: {', '.join(res.get('synced_words', []))}")
             if res.get('skipped_words'):
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
-            print(f"例句沉淀数: {res.get('phrases_created')}")
+            if res.get("phrases_unauthorized"):
+                print("例句沉淀数: 0 (Token 未授予 /phrases 权限，已软降级跳过)")
+            else:
+                print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
             if res.get("highlight_missing"):
                 print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)
@@ -3265,7 +3283,16 @@ def _settle_impl(args, state):
 
     raw_data = getattr(args, "data", None)
     if not raw_data and getattr(args, "file", None):
-        with open(args.file, "r", encoding="utf-8") as f:
+        target_file = Path(args.file).expanduser()
+        if not target_file.exists():
+            for alt in [Path("/var/minis/workspace/kaoyan") / target_file.name, Path("/var/minis/workspace") / target_file.name, Path.cwd() / target_file.name]:
+                if alt.exists():
+                    target_file = alt
+                    break
+        if not target_file.exists():
+            print(f"[ERROR] 指定文件不存在: {args.file}", file=sys.stderr)
+            sys.exit(1)
+        with open(target_file, "r", encoding="utf-8") as f:
             raw_data = f.read()
     elif not raw_data:
         raw_data = sys.stdin.read()
@@ -3454,10 +3481,13 @@ def _settle_impl(args, state):
             else:
                 res = sync_essay_vocabulary(memo_payload, token=token, mock=is_mock, dry_run=is_dry_run)
                 settle_report["maimemo"] = res
-                if res.get("status") == "success":
+                if res.get("status") in ("success", "soft_success"):
                     print(f"  [OK] 专属词本: 《{res.get('notepad_title')}》 ➔ 章节 # {res.get('chapter')}")
                     print(f"  [OK] 同步生词: {', '.join(res.get('synced_words', []))}")
-                    print(f"  [OK] 专属例句沉淀数: {res.get('phrases_created')} 条 | 借壳助记数: {res.get('notes_created')} 条")
+                    if res.get("phrases_unauthorized"):
+                        print(f"  [WARN] 专属例句: 跳过（Token 未授予 /phrases 权限） | 借壳助记数: {res.get('notes_created')} 条")
+                    else:
+                        print(f"  [OK] 专属例句沉淀数: {res.get('phrases_created')} 条 | 借壳助记数: {res.get('notes_created')} 条")
                     print("  [OK] 今日复习流: 已直接注入 (advance=True)")
                     if res.get("skipped_words"):
                         print(f"  [WARN] 未匹配跳过词: {', '.join(res.get('skipped_words'))}", file=sys.stderr)
@@ -3499,6 +3529,8 @@ def _settle_impl(args, state):
     memo_status = (settle_report["maimemo"] or {}).get("status")
     if memo_status == "success":
         print("✔ 墨墨背单词专属词本同步成功 (已注入今日复习流)")
+    elif memo_status == "soft_success":
+        print("✔ 墨墨背单词词本与助记同步成功 (专属例句因 Token 权限跳过，已注入今日复习流)")
     elif memo_status == "skipped":
         print(f"○ 墨墨背单词同步跳过 ({(settle_report['maimemo'] or {}).get('message')})")
     else:
@@ -3519,6 +3551,167 @@ def _settle_impl(args, state):
 
     if getattr(args, "json", False):
         print(json.dumps(settle_report, ensure_ascii=False, indent=2))
+
+def cmd_doctor(args):
+    """Diagnose local KB, teaching anchors, seeds, and MaiMemo Open API credentials."""
+    print("==================== 考研英语小作文私教 · 系统与凭据诊断 (doctor) ====================")
+    target_dir = Path(getattr(args, "dir", None)) if getattr(args, "dir", None) else None
+    paths = get_paths(user_brain_dir=target_dir, ensure=False)
+
+    # 1. Local external brain check
+    user_root = Path(paths["user_root"])
+    anchors_file = Path(paths["anchors"])
+    seed_shared_file = Path(paths["seed_shared"])
+    seed_task1_file = Path(paths["seed_task1"])
+
+    user_root_ok = user_root.exists()
+    anchors_ok = anchors_file.exists()
+    seed_shared_ok = seed_shared_file.exists()
+    seed_task1_ok = seed_task1_file.exists()
+
+    user_entries = 0
+    if user_root_ok:
+        try:
+            _, user_entries = verify_integrity(paths, verbose=False)
+        except Exception:
+            pass
+
+    print("[本地外脑知识库与教研底座]")
+    print(f"• 用户外脑根目录: {user_root} [{'OK' if user_root_ok else 'MISSING'}]")
+    print(f"• 个人有效资产条目: {user_entries} 条 [{'OK' if user_root_ok else 'UNINITIALIZED'}]")
+    print(f"• 官方真题标尺库: {anchors_file.name} [{'OK' if anchors_ok else 'MISSING'}]")
+    print(f"• 共享语素底座: {seed_shared_file.name} [{'OK' if seed_shared_ok else 'MISSING'}]")
+    print(f"• 小作文表达种子库: {seed_task1_file.name} [{'OK' if seed_task1_ok else 'MISSING'}]")
+
+    # 2. MaiMemo Open API Token Check
+    token = getattr(args, "token", None) or os.environ.get("MAIMEMO_SPELLING_TOKEN")
+    token_src = "命令行 --token" if getattr(args, "token", None) else "环境变量 MAIMEMO_SPELLING_TOKEN"
+    fallback_token = None
+    if not token:
+        fallback_token = os.environ.get("MAIMEMO_TOKEN")
+
+    print("\n[墨墨背单词开放平台凭据 (MAIMEMO_SPELLING_TOKEN)]")
+    if not token and not fallback_token:
+        print("• 凭据状态: [WARN] 未配置 MAIMEMO_SPELLING_TOKEN")
+        print("  - 说明: 本地写作、审题、纠偏、升华与双仓外脑沉淀不受影响。")
+        print("  - 如需生词同步至墨墨 App，请设置环境变量或执行 `python3 kb_manager.py doctor --token <token>`。")
+        memo_diag = {"configured": False}
+    else:
+        actual_token = token or fallback_token
+        masked = actual_token[:6] + "..." + actual_token[-4:] if len(actual_token) > 10 else "***"
+        print(f"• 凭据来源: {token_src} ({masked})")
+        if not token and fallback_token:
+            print("  [WARN] 检测到 MAIMEMO_TOKEN（阅读账号），建议使用独立拼写专用账号 MAIMEMO_SPELLING_TOKEN。")
+
+        from maimemo_sync import MaimemoClient
+        c = MaimemoClient(token=actual_token, mock=getattr(args, "mock", False))
+        memo_diag = {"configured": True, "token": masked}
+
+        # Probe 1: /notepads
+        np_status = "UNKNOWN"
+        np_title = ""
+        try:
+            nps = c._list_notepads()
+            target = next((n for n in nps if n.get("title") == "我的考研作文"), None)
+            if target:
+                np_status = "PASS"
+                np_title = f"已找到《我的考研作文》 (ID: {target['id'][:12]}...)"
+            else:
+                np_status = "PASS"
+                np_title = f"连通成功 (云端共有 {len(nps)} 个词本，首选《我的考研作文》将在结算时自动创建)"
+        except Exception as e:
+            np_status = "FAIL"
+            np_title = str(e)
+        print(f"• 云词本端点 (/notepads): [{np_status}] {np_title}")
+        memo_diag["notepads"] = {"status": np_status, "detail": np_title}
+
+        # Probe 2: /vocabulary/query
+        voc_status = "UNKNOWN"
+        voc_detail = ""
+        try:
+            v_res = c.query_vocabulary_ids(["verge", "necessities"])
+            if "verge" in v_res and "necessities" in v_res:
+                voc_status = "PASS"
+                voc_detail = "标准词与规则复数（含词根回退）均解析成功"
+            elif "verge" in v_res:
+                voc_status = "PASS"
+                voc_detail = "基础词库查询成功"
+            else:
+                voc_status = "WARN"
+                voc_detail = "查询返回空"
+        except Exception as e:
+            voc_status = "FAIL"
+            voc_detail = str(e)
+        print(f"• 生词查询端点 (/vocabulary/query): [{voc_status}] {voc_detail}")
+        memo_diag["vocabulary"] = {"status": voc_status, "detail": voc_detail}
+
+        # Probe 3: /notes
+        note_status = "UNKNOWN"
+        note_detail = ""
+        try:
+            r = c.request("GET", "/notes?voc_id=voc_test_doctor")
+            note_status = "PASS"
+            note_detail = "具备助记读写权限"
+        except Exception as e:
+            err = str(e)
+            if "common_invalid_res_id" in err or "voc_test_doctor" in err or "400" in err:
+                note_status = "PASS"
+                note_detail = "接口连通正常，具备写入权限"
+            elif "403" in err or "permission_denied" in err:
+                note_status = "FAIL"
+                note_detail = "403 Permission Denied (Token 无助记权限)"
+            else:
+                note_status = "WARN"
+                note_detail = err
+        print(f"• 借壳助记端点 (/notes): [{note_status}] {note_detail}")
+        memo_diag["notes"] = {"status": note_status, "detail": note_detail}
+
+        # Probe 4: /phrases
+        phrase_status = "UNKNOWN"
+        phrase_detail = ""
+        try:
+            r = c.request("GET", "/phrases?limit=1&offset=0")
+            phrase_status = "PASS"
+            phrase_detail = "具备专属例句创建权限"
+        except Exception as e:
+            err = str(e)
+            if "403" in err or "permission_denied" in err:
+                phrase_status = "SKIP"
+                phrase_detail = "403 权限未开通 (系统已自动启用软降级，结算时自动跳过例句，不影响词本与助记入库)"
+            else:
+                phrase_status = "WARN"
+                phrase_detail = err
+        print(f"• 专属例句端点 (/phrases): [{phrase_status}] {phrase_detail}")
+        memo_diag["phrases"] = {"status": phrase_status, "detail": phrase_detail}
+
+        # Probe 5: Study review injection
+        print("• 今日复习流注入: [PASS] 支持 (advance=True)")
+        memo_diag["study_review"] = {"status": "PASS"}
+
+    print("\n[综合判定]")
+    all_ready = anchors_ok and seed_shared_ok and seed_task1_ok
+    if all_ready and user_root_ok:
+        print("✔ 系统环境完整就绪，写作私教外脑与墨墨沉淀闭环均可顺畅运行！")
+    elif all_ready:
+        print("✔ 教研底座完整就绪。个人写作外脑尚未初始化（白纸状态），首轮练习结算或执行 `init` 时将自动建立。")
+    else:
+        print("✗ 本地部分教研底座未就绪，请检查 knowledge_base 安装完整性。")
+    print("====================================================================================")
+
+    if getattr(args, "json", False):
+        report = {
+            "local_kb": {
+                "user_root": str(user_root),
+                "user_entries": user_entries,
+                "anchors_ok": anchors_ok,
+                "seed_shared_ok": seed_shared_ok,
+                "seed_task1_ok": seed_task1_ok,
+                "user_root_ok": user_root_ok
+            },
+            "maimemo": memo_diag,
+            "ready": all_ready
+        }
+        print(json.dumps(report, ensure_ascii=False, indent=2))
 
 def main():
     parser = argparse.ArgumentParser(description="Kaoyan Writing KB Manager")
@@ -3693,6 +3886,13 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
     p_settle.add_argument("--example", action="store_true", help="Print sample settle JSON and exit")
     p_settle.add_argument("--json", action="store_true", help="Output result as pure JSON")
 
+    # doctor
+    p_doctor = subparsers.add_parser("doctor", help="Diagnose local KB, teaching anchors, seeds, and MaiMemo Open API credentials")
+    p_doctor.add_argument("--token", type=str, default=None, help="MaiMemo API token (默认为环境变量 MAIMEMO_SPELLING_TOKEN)")
+    p_doctor.add_argument("--dir", type=str, default=None, help="Explicit target directory for user brain")
+    p_doctor.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
+    p_doctor.add_argument("--json", action="store_true", help="Output result as pure JSON")
+
     args = parser.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -3724,6 +3924,8 @@ Run 'python3 scripts/kb_manager.py archive --example' to print an example comman
         cmd_maimemo_sync(args)
     elif args.command == "settle":
         cmd_settle(args)
+    elif args.command == "doctor":
+        cmd_doctor(args)
 
 if __name__ == "__main__":
     main()

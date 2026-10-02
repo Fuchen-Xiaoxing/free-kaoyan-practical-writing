@@ -16,11 +16,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import maimemo_sync as ms
 from maimemo_sync import (
     find_word_highlight_ranges,
     update_notepad_content,
     plan_notepad_update,
     format_mnemonic_note,
+    get_lemma_candidates,
     MaimemoClient,
     sync_essay_vocabulary,
     DEFAULT_NOTEPAD_TITLE
@@ -61,6 +63,11 @@ class TestCrossRunIdempotency(unittest.TestCase):
                 return {"success": True, "errors": [],
                         "data": {"voc": [{"id": f"voc_{w}", "spelling": w} for w in spells]}}
             if path.startswith("/notepads?") and method == "GET":
+                if "limit=" in path:
+                    import urllib.parse
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+                    if int(qs.get("limit", [10])[0]) > 10:
+                        raise ValueError("MaiMemo API 请求失败 [400]: property 'limit' must be <= 10")
                 return {"success": True, "errors": [], "data": {"notepads": [
                     {"id": "np1", "title": ms.DEFAULT_NOTEPAD_TITLE, "brief": "", "tags": ["考研"],
                      "status": "PUBLISHED"}]}}
@@ -335,6 +342,86 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         res = sync_essay_vocabulary(payload, mock=True)
         self.assertEqual(res["status"], "success")
         self.assertIn("prolong", res["highlight_missing"])
+
+    def test_notepad_pagination_and_limit_enforcement(self):
+        """测试词本列表按 limit<=10 分页，且请求 limit>10 必须被拦截报 400。"""
+        client = MaimemoClient(token="dummy", mock=True)
+        # Calling with limit=50 must raise 400
+        with self.assertRaises(ValueError) as ctx:
+            client.request("GET", "/notepads?limit=50&offset=0")
+        self.assertIn("limit' must be <= 10", str(ctx.exception))
+
+        # Default sync_notepad should succeed using pagination
+        res = client.sync_notepad(DEFAULT_NOTEPAD_TITLE, "2013英二小作文", ["verge"])
+        self.assertEqual(res["action"], "updated")
+
+    def test_phrases_403_circuit_breaker_and_soft_success(self):
+        """测试例句端点遭遇 403 权限被拒时，单次快速熔断跳过后续词，且整体判定为 soft_success。"""
+        phrase_calls = []
+
+        def mock_request_with_403(self_client, method, path, body=None):
+            if path == "/phrases" and method == "POST":
+                phrase_calls.append(body["phrase"]["phrase"])
+                raise ValueError("MaiMemo API 请求失败 [403]: {\"errors\":[{\"code\":\"common_permission_denied\",\"msg\":\"Permission denied\"}],\"success\":false}")
+            return MaimemoClient._mock_response(self_client, method, path, body)
+
+        payload = {
+            "chapter": "2013英二小作文",
+            "words": [
+                {"spelling": "verge", "sentence": "kids on the verge of dropping out"},
+                {"spelling": "constraint", "sentence": "under financial constraints"},
+                {"spelling": "necessity", "sentence": "daily necessities will be on sale"}
+            ]
+        }
+
+        orig_request = MaimemoClient.request
+        MaimemoClient.request = mock_request_with_403
+        try:
+            res = sync_essay_vocabulary(payload, token="dummy")
+            # Must trip circuit breaker: exactly 1 call to /phrases, not 3 calls!
+            self.assertEqual(len(phrase_calls), 1)
+            self.assertEqual(res["status"], "soft_success")
+            self.assertTrue(res["phrases_unauthorized"])
+            self.assertEqual(res["notes_created"], 3)
+            self.assertEqual(res["phrases_created"], 0)
+            self.assertTrue("跳过" in res["message"] or "已同步成功" in res["message"])
+        finally:
+            MaimemoClient.request = orig_request
+
+    def test_vocabulary_lemmatization_fallback(self):
+        """测试词形屈折（复数/过去式/进行时）自动回退到词根原型并命中。"""
+        cands_ies = ms.get_lemma_candidates("necessities")
+        self.assertIn("necessity", cands_ies)
+        cands_s = ms.get_lemma_candidates("constraints")
+        self.assertIn("constraint", cands_s)
+        cands_ed = ms.get_lemma_candidates("dropped")
+        self.assertIn("drop", cands_ed)
+        cands_ing = ms.get_lemma_candidates("helping")
+        self.assertIn("help", cands_ing)
+
+        # Mock vocabulary query fallback behavior
+        def mock_query_with_lemma(self_client, method, path, body=None):
+            if path == "/vocabulary/query":
+                spells = (body or {}).get("spellings", [])
+                vocs = []
+                for s in spells:
+                    if s == "necessities":
+                        # Simulate MaiMemo returning empty for plural
+                        continue
+                    vocs.append({"id": f"voc_{s}", "spelling": s})
+                return {"success": True, "errors": [], "data": {"voc": vocs}}
+            return MaimemoClient._mock_response(self_client, method, path, body)
+
+        orig_request = MaimemoClient.request
+        MaimemoClient.request = mock_query_with_lemma
+        try:
+            client = MaimemoClient(token="dummy")
+            mapping = client.query_vocabulary_ids(["necessities", "verge"])
+            self.assertIn("necessities", mapping)
+            self.assertEqual(mapping["necessities"], "voc_necessity")
+            self.assertIn("verge", mapping)
+        finally:
+            MaimemoClient.request = orig_request
 
 
 class TestDataUnwrapping(unittest.TestCase):
