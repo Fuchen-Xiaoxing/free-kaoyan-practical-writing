@@ -1,6 +1,6 @@
 # MaiMemo (墨墨背单词) Open API 裁剪规范与接口契约
 
-本文档为考研英语小作文私教专用的墨墨背单词 Open API 裁剪规范。仅保留与写作实战沉淀直接相关的 5 项核心能力，完全自包含于本 Skill 内部。
+本文档为考研英语小作文私教专用的墨墨背单词 Open API 裁剪规范。根据用户教学实战决议，**例句创建 (`POST /phrases`) 默认彻底停用**，仅聚焦与写作实战沉淀最核心的 4 项能力（生词解析、云词本维护、深度语法助记、加入今日复习），完全自包含于本 Skill 内部。
 
 ---
 
@@ -23,10 +23,10 @@
   *(注: 本 Skill 每次写作结算仅涉及 3~8 个生词，脚本内部已内置**滑动窗口限流器**，严格执行上述三档上限并保持平均 ≥0.5 秒/次的调用间隔，确保安全不超频；命中 429 后退避重试一次。)*
 - **失败语义 (Failure Contract)**:
   - 返回 `status="success"` 才算真正同步成功；
-  - 单词全部未匹配、或例句创建全部失败、或存在例句/助记创建失败 → `status="partial_failed"`，并在 `message` / `failure_details` 中给出原因，命令以**非零退出码**终止；
+  - 单词全部未匹配、或存在助记创建失败 → `status="partial_failed"`，并在 `message` / `failure_details` 中给出原因，命令以**非零退出码**终止；
+  - **例句创建默认跳过**：`sync_phrases` 默认为 `False`，不发起 `/phrases` 请求，不尝试写例句，零 403 风险，`phrases_created: 0` 为标准正常表现；
   - 载荷内重复 `spelling` 自动去重；同一章节内已存在的单词不重复写入词本；
-  - **跨次幂等**：以"该词是否已存在于目标章节"为已同步凭证。重复同步同一章节时，已存在的词记为 `already_synced_words`，**不重复创建例句与助记**（`POST /phrases` 与 `POST /notes` 每次调用都会新建对象，否则会在学生账号里堆出重复词卡）；仅补建缺失卡片，且只把本次新建的词推入复习流；
-  - 目标词未出现在例句原句中时，**不生成高亮区间**（不回落高亮句首），该词记入 `highlight_missing` 供私教复核例句质量；
+  - **跨次幂等**：以"该词是否已存在于目标章节"为已同步凭证。重复同步同一章节时，已存在的词记为 `already_synced_words`，**不重复创建助记**（`POST /notes` 每次调用都会新建对象，否则会在学生账号里堆出重复词卡）；仅补建缺失卡片，且只把本次新建的词推入复习流；
   - `remote_side_effects` 字段显式声明本次已发生的远端写入（词本更新 / 复习流推送），提醒"远端写入不可撤销"。
 
 ---
@@ -81,16 +81,15 @@
 
 ---
 
-### 3. 作文原句专属例句与字符高亮 (`POST /phrases`)
-- **作用**: 将本次作文中的原句收录为该单词在墨墨中的例句，并精准高亮该单词。
-- **Token 权限分级与 403 软降级 (Soft Degradation)**:
-  - 墨墨开放平台 Token 具备权限分级体系。部分用户的个人 Token 仅开通云词本与助记权限，调用 `/phrases` 时返回 HTTP 403 (`common_permission_denied`)。
-  - 同步脚本实现**单次熔断与软降级机制**：首次探测到 403 时立即熔断后续例句写入，绝不中断整体验收流程，保障云词本、生词入库、深度助记与复习流注入 100% 成功，系统返回 `soft_success` 并以 0 退出码完成结算。无需教秘向学员索要特殊权限。
-- **高亮算法契约 (`highlight: PhraseHighlightRange[]`)**:
-  - 半开区间 `[start, end)`（0-indexed 字符索引）。
-  - 脚本自动定位单词在例句中的起始与结束字符位置（兼容大小写形式与常见词尾屈折）。
-  - **未命中的处理**：若目标词确实不在例句中，则**省略 `highlight` 字段**（不带高亮建句），并在结果 `highlight_missing` 中列出该词，绝不把句首若干字符谎报为目标词位置。
-- **请求体**:
+### 3. 作文原句专属例句与字符高亮 (`POST /phrases`) [教学法默认停用 / DEPRECATED BY POLICY]
+- **政策决议与背景**:
+  - 用户明确指示：“**墨墨背单词不需要改例句了，不用每次都尝试了，只需要改助记即可。**”
+  - 因此同步模块默认设置 `sync_phrases: bool = False`。同步流程完全跳过 `/phrases` 请求，彻底免除 403 权限受限风险与 API 额度浪费，无需任何权限降级等待。
+  - 作文原句与其主干/修饰成分剖析已完整内嵌在“借壳”写作深度助记（`/notes`）中，在 App 内查看单词助记时即可全面复习原句。
+- **底层兼容保留（Opt-in）**:
+  - 仅当明确传入 `--sync-phrases` 参数或调用函数时显式设置 `sync_phrases=True` 时，才会激活例句写入。
+  - 底层仍保留半开区间 `[start, end)` 字符高亮算法与 `highlight_missing` 缺失检测。
+- **请求体（仅开启时有效）**:
   ```json
   {
     "phrase": {
@@ -145,11 +144,13 @@
 
 ## 三、结算数据载荷契约（`settle` 载荷内的 `maimemo` 段）
 
-> **常规业务只走 `settle`**：阶段 3 用户确认后，把 `maimemo` 段写进工作区文件（推荐 `/var/minis/workspace/kaoyan/settle.json`，或当前目录 `settle.json`），由 `python3 kb_manager.py settle --file settle.json` 原子化提交，**严禁零散碎片化调用**。
+> **常规业务只走 `settle`**：阶段 3 用户确认后，把完整结算载荷写进工作区文件（推荐 `/var/minis/workspace/kaoyan/settle.json`，或当前目录 `settle.json`），由 `python3 kb_manager.py settle --file settle.json` 原子化提交，**严禁在 settle 前运行任何零散多余指令**。
 >
-> 独立载荷**仅供排错与单点重试**（例如上次仅墨墨同步失败）：此时才单独写入 `maimemo_sync.json` 并执行 `python3 kb_manager.py maimemo-sync --file maimemo_sync.json`。该独立入口已幂等化，重复执行不会产生重复词卡。
+> 独立载荷**仅供排错与单点重试**（例如仅墨墨同步因网络抖动中断）：
+> - `maimemo-sync` 现已**原生支持自动解包嵌套 `settle.json`**：直接执行 `python3 kb_manager.py maimemo-sync --file settle.json` 即可（会自动提取其中的 `maimemo` 段和顶层 `task_id`，缺省自动降级为 `task_id="manual"`），**严禁额外编写脚本手动剥离 JSON 字段**！
+> - 该独立入口全幂等，重复执行绝不产生重复词卡。
 
-**载荷字段**（与 SKILL.md §四 的 `settle` 载荷 `maimemo` 段完全一致，完整示例见该处；`maimemo-sync` 的顶层另加 `task_id`）：
+**载荷字段**（与 SKILL.md §四 的 `settle` 载荷 `maimemo` 段完全一致，完整示例见该处）：
 
 - `chapter`：章节名，如 `2011英二小作文`；
-- `words[]`：`spelling`（必填）、`type`（`spelling_fix` 或 `advanced_vocab`）、`misspelling`（纠偏卡必填）、`sentence`（作文原句，缺省则不出例句）、`translation`、`usage_note`（考研写作用法）、`grammar_note`（原句语法剖析）。
+- `words[]`：`spelling`（必填）、`type`（`spelling_fix` 或 `advanced_vocab`）、`misspelling`（纠偏卡必填）、`sentence`（作文原句）、`translation`、`usage_note`（考研写作用法）、`grammar_note`（原句语法剖析）。

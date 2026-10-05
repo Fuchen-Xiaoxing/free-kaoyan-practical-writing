@@ -498,10 +498,22 @@ class MaimemoClient:
         return data if isinstance(data, dict) else {"added_count": len(voc_ids)}
 
 
-def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, dry_run: bool = False) -> dict:
+def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, dry_run: bool = False, sync_phrases: bool = False) -> dict:
     """
     Main orchestration function to sync kaoyan essay vocabulary into MaiMemo App.
+
+    By user decision, sync_phrases defaults to False: we do NOT sync or modify
+    example phrases (/phrases). We focus strictly on:
+      1. Cloud notepad 《我的考研作文》 with chapter
+      2. Deep borrowed-shell mnemonics (/notes)
+      3. Pushing words to immediate review stream (/study/add_words with advance:true)
     """
+    if isinstance(payload, dict) and "maimemo" in payload and isinstance(payload["maimemo"], dict):
+        sub = dict(payload["maimemo"])
+        if "task_id" not in sub and "task_id" in payload:
+            sub["task_id"] = payload["task_id"]
+        payload = sub
+
     chapter = payload.get("chapter", "考研小作文实战").strip()
     words = payload.get("words", [])
     if not words:
@@ -558,7 +570,7 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         to_create = [w for w in matched_words if w["spelling"].strip().lower() in added_lower]
         already_synced = [w["spelling"] for w in matched_words if w["spelling"].strip().lower() not in added_lower]
 
-    # 3. Create example phrases & 4. Create mnemonic notes
+    # 3. Create example phrases (disabled by default per user strategy) & 4. Create mnemonic notes
     phrase_count = 0
     note_count = 0
     phrase_failures = []
@@ -572,8 +584,8 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
         sentence = w.get("sentence", "")
         translation = w.get("translation", "")
 
-        # 3. Phrase creation
-        if sentence and not phrases_unauthorized:
+        # 3. Phrase creation (only executed if sync_phrases=True)
+        if sync_phrases and sentence and not phrases_unauthorized:
             if not find_word_highlight_ranges(sentence, spelling):
                 highlight_missing.append(spelling)
             try:
@@ -587,7 +599,7 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
                     # Fast-fail for remaining words to avoid duplicate calls and log spam.
                     phrases_unauthorized = True
 
-        # 4. Note creation
+        # 4. Note creation (always performed for newly synced words)
         note_text = format_mnemonic_note(w)
         try:
             client.create_mnemonic_note(vid, note_text)
@@ -600,18 +612,20 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
     vids = [w["voc_id"] for w in to_create]
     study_res = client.add_to_today_review(vids, advance=True)
 
-    # 6. 部分失败与软降级判定：例句若因 403 权限未开通跳过，只要词本与助记成功即判定为 soft_success
-    expected_phrases = len([w for w in to_create if w.get("sentence")])
+    # 6. 部分失败判定
     status = "success"
-    message = ""
-    if phrase_failures and phrase_count == 0 and expected_phrases > 0:
+    message = "云词本与借壳助记已同步成功"
+    if note_failures:
+        status = "partial_failed"
+        message = f"助记创建失败 {len(note_failures)} 条"
+    elif phrase_failures and phrase_count == 0 and sync_phrases:
         if phrases_unauthorized and (note_count > 0 or not to_create):
             status = "soft_success"
             message = "云词本与借壳助记已同步成功；专属例句已跳过（当前 Token 未开通 /phrases 权限）"
         else:
             status = "partial_failed"
             message = f"例句创建全部失败（{len(phrase_failures)} 条）：{'; '.join(phrase_failures[:3])}"
-    elif phrase_failures or note_failures:
+    elif phrase_failures:
         if phrases_unauthorized and not note_failures:
             status = "soft_success"
             message = "云词本与借壳助记已同步成功；专属例句已跳过（当前 Token 未开通 /phrases 权限）"
@@ -619,6 +633,7 @@ def sync_essay_vocabulary(payload: dict, token: str = None, mock: bool = False, 
             message = (f"部分例句/助记创建失败：例句失败 {len(phrase_failures)} 条，"
                        f"助记失败 {len(note_failures)} 条")
             status = "partial_failed"
+
     if already_synced and status in ("success", "soft_success"):
         message += f"（其中 {len(already_synced)} 词此前已同步，本次幂等跳过）"
 
@@ -656,6 +671,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Dry run without modifying remote MaiMemo data")
     parser.add_argument("--mock", action="store_true", help="Mock API responses for offline tests")
     parser.add_argument("--example", action="store_true", help="Print payload template and exit")
+    parser.add_argument("--sync-phrases", action="store_true", help="是否尝试同步专属例句 (默认不启用，聚焦词本与助记)")
     parser.add_argument("--json", action="store_true", help="Output result as pure JSON")
 
     args = parser.parse_args()
@@ -705,7 +721,7 @@ def main():
         payload = json.load(f)
 
     try:
-        res = sync_essay_vocabulary(payload, token=args.token, mock=args.mock, dry_run=args.dry_run)
+        res = sync_essay_vocabulary(payload, token=args.token, mock=args.mock, dry_run=args.dry_run, sync_phrases=args.sync_phrases)
         if res.get("status") in ("partial_failed", "error"):
             if args.json:
                 print(json.dumps(res, ensure_ascii=False, indent=2))
@@ -729,12 +745,13 @@ def main():
             print(f"同步生词: {', '.join(res.get('synced_words', []))}")
             if res.get('skipped_words'):
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
-            if res.get("phrases_unauthorized"):
-                print("例句沉淀数: 0 (Token 未授予 /phrases 权限，已软降级跳过)")
-            else:
-                print(f"例句沉淀数: {res.get('phrases_created')}")
+            if args.sync_phrases:
+                if res.get("phrases_unauthorized"):
+                    print("例句沉淀数: 0 (Token 未授予 /phrases 权限，已软降级跳过)")
+                else:
+                    print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
-            if res.get("highlight_missing"):
+            if args.sync_phrases and res.get("highlight_missing"):
                 print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)
             print(f"今日复习流: 已推入 (advance=True)")
     except Exception as e:

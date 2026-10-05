@@ -83,12 +83,12 @@
 
 ### 三段式实战推进公式
 - **首段（2 句速决）**：
-  - *官方学者邀请*：`On behalf of [Organization], I have the great honor of inviting you to be our keynote speaker at the upcoming [Event].`
+  - *正式公文学者邀请*：`On behalf of [Organization], I have the great honor of inviting you to be our keynote speaker at the upcoming [Event].`
   - *同侪活动邀请*：`As an organizer of our [Activity], I am writing to invite you to our online meeting scheduled for [Time] via [Platform].`
 - **次段（3 句承重）**：精确时空要素 ➔ 受众规模与宗旨 ➔ 互动形式与演讲/讨论价值
   `The event is scheduled to convene at [Time] on [Date] in [Venue]. Given your unique background in this domain, your presence would provide participants with invaluable perspectives. Following the main session, an interactive Q&A discussion will be incorporated.`
 - **尾段（2 句闭环）**：
-  - *官方*：`We would be truly grateful if you could favor us with a reply confirming your availability by [Deadline].`
+  - *正式公文*：`We would be truly grateful if you could favor us with a reply confirming your availability by [Deadline].`
   - *同侪*：`We would be thrilled if you could join us. Looking forward to our lively discussion.`
 
 ---

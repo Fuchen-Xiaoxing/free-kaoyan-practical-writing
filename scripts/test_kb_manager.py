@@ -4,7 +4,7 @@
 test_kb_manager.py - Comprehensive Automated Test Suite for Kaoyan Writing KB Manager
 Covers:
   1. verify: Strict PASS on clean DB, FAIL on corrupt JSON line or missing required fields.
-  2. anchor: Brief mode omits official_model text by default; --full includes official_model.
+  2. anchor: Brief mode omits reference model text by default; --full includes reference model.
   3. query: 3-tier retrieval, invitation returns zero library morphemes, templates column non-empty.
   4. append: 4-rule admission gate, stable ID generation, deduplication, history.log recording.
   5. batch-update: Evidence-based mastery (independent use -> 稳定, error -> 敢用需注意).
@@ -121,19 +121,20 @@ class TestKBManager(unittest.TestCase):
             shutil.rmtree(temp_root, ignore_errors=True)
 
     def test_03_anchor_brief_omits_model_and_full_includes_it(self):
-        """E3: Test 'anchor' brief mode does NOT output official model; --full does."""
+        """E3: Test 'anchor' brief mode does NOT output reference model; --full does."""
         # 1. Brief mode
         res_brief = self.run_cmd(["anchor", "--genre", "notice"])
         self.assertEqual(res_brief.returncode, 0, f"anchor failed: {res_brief.stderr}")
         self.assertNotIn("Fifty volunteers will be recruited", res_brief.stdout)
-        self.assertIn("官方范文正文默认不展示", res_brief.stdout)
+        self.assertIn("参考范文正文默认不展示", res_brief.stdout)
         self.assertIn("语域与语气深度剖析", res_brief.stdout)
         self.assertIn("句法与考纲词汇标尺", res_brief.stdout)
 
         # 2. Full mode
         res_full = self.run_cmd(["anchor", "--genre", "notice", "--full"])
         self.assertEqual(res_full.returncode, 0, f"anchor --full failed: {res_full.stderr}")
-        self.assertIn("官方高分范文 (Official Model", res_full.stdout)
+        self.assertIn("高分参考范文 (Reference Model", res_full.stdout)
+        self.assertIn("仅供私教后台研读，S0~S2 严禁直接贴给学员", res_full.stdout)
         self.assertIn("Fifty volunteers will be recruited", res_full.stdout)
 
     def test_04_query_invitation_relevance_and_no_library(self):
@@ -376,14 +377,14 @@ class TestKBManager(unittest.TestCase):
         # 2. Full mode with version 1
         res_v1 = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "1"])
         self.assertEqual(res_v1.returncode, 0)
-        self.assertIn("Official Model · 版本一 高级范文", res_v1.stdout)
-        self.assertNotIn("Official Model · 版本二 满分习作", res_v1.stdout)
+        self.assertIn("Reference Model · 版本一 高级范文", res_v1.stdout)
+        self.assertNotIn("Reference Model · 版本二 满分习作", res_v1.stdout)
 
         # 3. Full mode with version 2
         res_v2 = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "2"])
         self.assertEqual(res_v2.returncode, 0)
-        self.assertIn("Official Model · 版本二 满分习作", res_v2.stdout)
-        self.assertNotIn("Official Model · 版本一 高级范文", res_v2.stdout)
+        self.assertIn("Reference Model · 版本二 满分习作", res_v2.stdout)
+        self.assertNotIn("Reference Model · 版本一 高级范文", res_v2.stdout)
 
         # 4. Full mode with version all (default)
         res_all = self.run_cmd(["anchor", "--year", "2021", "--full", "--model-version", "all"])
@@ -1695,8 +1696,47 @@ class TestKBManager(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_46_maimemo_sync_nested_settle_json(self):
+        """maimemo-sync command: natively accepts a full settle.json without manual payload extraction."""
+        temp_dir = tempfile.mkdtemp(prefix="test_settle_sync_")
+        try:
+            settle_payload = {
+                "task_id": "T2014-E2-ADV",
+                "genre": "advice",
+                "year": "2014",
+                "exam_type": "English II",
+                "title": "合租生活习惯（2014英二）",
+                "essay_content": "Dear John,\n\n    I keep early hours.\n\n                                        Li Ming\n",
+                "batch": {"status_updates": [], "new_items": []},
+                "maimemo": {
+                    "chapter": "2014英二小作文",
+                    "words": [
+                        {
+                            "spelling": "brief",
+                            "type": "advanced_vocab",
+                            "sentence": "I would like to brief you about my living habits.",
+                            "usage_note": "及物动词 brief sb. about sth.",
+                            "grammar_note": "would like to brief 谓语"
+                        }
+                    ]
+                }
+            }
+            settle_file = Path(temp_dir) / "settle.json"
+            settle_file.write_text(json.dumps(settle_payload, ensure_ascii=False), encoding="utf-8")
+
+            res = self.run_cmd(["maimemo-sync", "--file", str(settle_file), "--mock", "--json"])
+            self.assertEqual(res.returncode, 0, f"maimemo-sync with settle.json failed: {res.stderr}\n{res.stdout}")
+            data = json.loads(res.stdout)
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["chapter"], "2014英二小作文")
+            self.assertEqual(data["synced_words"], ["brief"])
+            self.assertEqual(data["notes_created"], 1)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

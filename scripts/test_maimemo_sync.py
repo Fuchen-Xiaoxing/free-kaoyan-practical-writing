@@ -105,13 +105,13 @@ class TestCrossRunIdempotency(unittest.TestCase):
         original = ms.MaimemoClient.request
         ms.MaimemoClient.request = fake_request
         try:
-            first = ms.sync_essay_vocabulary(payload, token="dummy")
+            first = ms.sync_essay_vocabulary(payload, token="dummy", sync_phrases=True)
             self.assertEqual(first["status"], "success")
             self.assertEqual(len(state["phrases"]), 1)
             self.assertEqual(len(state["notes"]), 1)
             self.assertEqual(len(state["review_ids"]), 1)
 
-            second = ms.sync_essay_vocabulary(payload, token="dummy")
+            second = ms.sync_essay_vocabulary(payload, token="dummy", sync_phrases=True)
             self.assertEqual(second["status"], "success")
             self.assertEqual(len(state["phrases"]), 1, "retry duplicated the example phrase")
             self.assertEqual(len(state["notes"]), 1, "retry duplicated the mnemonic note")
@@ -244,9 +244,57 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         self.assertEqual(res["notepad_title"], DEFAULT_NOTEPAD_TITLE)
         self.assertEqual(res["chapter"], "2011英二小作文")
         self.assertEqual(res["synced_words"], ["accommodate", "prolong"])
-        self.assertEqual(res["phrases_created"], 2)
+        self.assertEqual(res["phrases_created"], 0)
         self.assertEqual(res["notes_created"], 2)
         self.assertTrue(res["study_advance"])
+
+    def test_sync_with_sync_phrases_opt_in(self):
+        """显式开启 sync_phrases=True 时创建专属例句。"""
+        payload = {
+            "chapter": "2011英二小作文",
+            "task_id": "T2011-E2-ADV",
+            "words": [
+                {
+                    "spelling": "accommodate",
+                    "type": "spelling_fix",
+                    "sentence": "The library is expected to prolong opening hours to accommodate students.",
+                    "usage_note": "考研高频动词",
+                    "grammar_note": "不定式作目的状语"
+                }
+            ]
+        }
+        res = sync_essay_vocabulary(payload, mock=True, sync_phrases=True)
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["phrases_created"], 1)
+        self.assertEqual(res["notes_created"], 1)
+
+    def test_sync_with_nested_settle_json(self):
+        """传入完整的 settle.json 载荷时自动解包 maimemo 段与 task_id。"""
+        settle_payload = {
+            "task_id": "T2014-E2-ADV",
+            "genre": "advice",
+            "year": "2014",
+            "exam_type": "English II",
+            "batch": {"status_updates": [], "new_items": []},
+            "maimemo": {
+                "chapter": "2014英二小作文",
+                "words": [
+                    {
+                        "spelling": "brief",
+                        "type": "advanced_vocab",
+                        "sentence": "I would like to brief you about my living habits.",
+                        "usage_note": "及物动词 brief sb. about sth.",
+                        "grammar_note": "would like to brief 谓语"
+                    }
+                ]
+            }
+        }
+        res = sync_essay_vocabulary(settle_payload, mock=True)
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["chapter"], "2014英二小作文")
+        self.assertEqual(res["synced_words"], ["brief"])
+        self.assertEqual(res["notes_created"], 1)
+        self.assertEqual(res["phrases_created"], 0)
 
     def test_empty_words_skipped(self):
         payload = {"chapter": "2011英二小作文", "words": []}
@@ -304,7 +352,7 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         res = sync_essay_vocabulary(payload, mock=True)
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["synced_words"], ["express"])
-        self.assertEqual(res["phrases_created"], 1)
+        self.assertEqual(res["phrases_created"], 0)
 
     def test_phrase_failures_surface_as_partial_failed(self):
         """P2-3: 例句创建全部失败时不得再返回 success（杜绝静默假成功）。"""
@@ -322,7 +370,7 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
 
         MaimemoClient.create_example_phrase = _boom
         try:
-            res = sync_essay_vocabulary(payload, mock=True)
+            res = sync_essay_vocabulary(payload, mock=True, sync_phrases=True)
         finally:
             MaimemoClient.create_example_phrase = original
 
@@ -339,7 +387,7 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
                 {"spelling": "prolong", "sentence": "This sentence does not contain the target."},
             ],
         }
-        res = sync_essay_vocabulary(payload, mock=True)
+        res = sync_essay_vocabulary(payload, mock=True, sync_phrases=True)
         self.assertEqual(res["status"], "success")
         self.assertIn("prolong", res["highlight_missing"])
 
@@ -377,7 +425,7 @@ class TestMaimemoSyncPipeline(unittest.TestCase):
         orig_request = MaimemoClient.request
         MaimemoClient.request = mock_request_with_403
         try:
-            res = sync_essay_vocabulary(payload, token="dummy")
+            res = sync_essay_vocabulary(payload, token="dummy", sync_phrases=True)
             # Must trip circuit breaker: exactly 1 call to /phrases, not 3 calls!
             self.assertEqual(len(phrase_calls), 1)
             self.assertEqual(res["status"], "soft_success")

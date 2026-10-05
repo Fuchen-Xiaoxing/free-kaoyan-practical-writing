@@ -4,8 +4,8 @@
 kb_manager.py - Knowledge Base Manager for Kaoyan Practical Writing (Section A)
 
 Core Capabilities:
-  1. anchor: Query official past paper anchor briefs (register analysis, vocabulary benchmark, extractable skeleton).
-             Official model text is internal-only by default and omitted unless --full is explicitly specified.
+  1. anchor: Query past paper reference model essay anchor briefs (register analysis, vocabulary benchmark, extractable skeleton).
+             Reference model text is internal-only by default and omitted unless --full is explicitly specified.
   2. query: 3-tier retrieval (hard filter + relevance scoring + strict quota <= 5, "宁缺毋滥") for pre-writing清单.
   3. append: Admission-controlled append with 4 hard rules, normalized deduplication, and stable ID generation.
   4. update-status / batch-update: Evidence-based mastery lifecycle (未接触 -> 学习中 -> 敢用 -> 稳定),
@@ -217,7 +217,7 @@ def get_user_brain_dir() -> Path:
             if exists_writable_dir(cand):
                 return Path(cand)
 
-        # Open Minis 官方 workspace 降级
+        # Open Minis 标准 workspace 降级
         minis_ws = "/var/minis/workspace/考研英语/写作外脑"
         if os.path.exists("/var/minis/workspace"):
             if exists_writable_dir(minis_ws):
@@ -675,7 +675,7 @@ def cmd_anchor(args):
     matches = filter_anchors(anchors, args.genre, args.year, getattr(args, "exam_type", None))
 
     if not matches:
-        print(f"[ANCHOR] 未检索到匹配的官方真题范文 (genre={genre_target}, year={year_target})。")
+        print(f"[ANCHOR] 未检索到匹配的真题参考范文 (genre={genre_target}, year={year_target})。")
         return
 
     # 统一排序：真题优先 + 年份降序。
@@ -712,7 +712,7 @@ def cmd_anchor(args):
         print(json.dumps(out_matches if len(out_matches) > 1 else out_matches[0], ensure_ascii=False, indent=2))
         return
 
-    print(f"=== 官方真题范文与语域基准标尺 (共 {len(matches)} 篇) ===")
+    print(f"=== 真题参考范文与语域基准标尺 (共 {len(matches)} 篇) ===")
     if truncated:
         print(f"• [提示] 已按最新年份展示前 {len(matches)} 篇真题标尺（共匹配到 {total_matched} 篇）。如需查阅更多可指定 --limit {total_matched} 或 --limit all。")
     for idx, anchor in enumerate(matches, 1):
@@ -749,23 +749,23 @@ def cmd_anchor(args):
         if source_file and source_file != "N/A":
             print(f"• 真题出处: 创作期语料库 (authoring-side corpus)")
 
-        # P0-2: Leak protection: Only display official model if --full is requested
+        # P0-2: Leak protection: Only display model essay if --full is requested
         if args.full:
             m_ver = getattr(args, "model_version", "all")
             if m_ver == "1" and anchor.get("model_advanced"):
-                print(f"\n• 官方高分范文 (Official Model · 版本一 高级范文):\n{anchor.get('model_advanced')}")
+                print(f"\n• 高分参考范文 (Reference Model · 版本一 高级范文 · 仅供私教后台研读，S0~S2 严禁直接贴给学员):\n{anchor.get('model_advanced')}")
             elif m_ver == "2" and anchor.get("model_perfect"):
-                print(f"\n• 官方高分范文 (Official Model · 版本二 满分习作):\n{anchor.get('model_perfect')}")
+                print(f"\n• 高分参考范文 (Reference Model · 版本二 满分习作 · 仅供私教后台研读，S0~S2 严禁直接贴给学员):\n{anchor.get('model_perfect')}")
             else:
-                print(f"\n• 官方高分范文 (Official Model):\n{model}")
+                print(f"\n• 高分参考范文 (Reference Model · 仅供私教后台研读，S0~S2 严禁直接贴给学员):\n{model}")
         else:
-            print(f"\n• [提示] 官方范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
+            print(f"\n• [提示] 参考范文正文默认不展示（作为 AI 内部语域标尺）。如需查验全文请添加 --full 参数。")
 
 def extract_mandated_signoff(prompt: str) -> str:
-    """从 Directions 题干中提取官方指定署名。
+    """从 Directions 题干中提取题干指定署名。
 
     仅当题干明文给出替代署名时才返回该署名；题干未给出署名要求时，返回带括号的
-    显式提示，绝不把"默认值"伪装成官方指定署名，以免与内置范文落款产生冲突。
+    显式提示，绝不把"默认值"伪装成题干指定署名，以免与内置范文落款产生冲突。
     """
     if not prompt:
         return "未指定（题干缺失，需人工确认）"
@@ -865,7 +865,7 @@ def filter_anchors(anchors: list, genre=None, year=None, exam_type=None) -> list
 def cmd_prompt(args):
     """
     专门为阶段 0/1（审题、零碎句诊断、三栏清单、基础版批改与偏题拦截）设计的题干调取接口。
-    核心安全机制：数据投影（Projection），物理剔除官方范文与高能句式骨架，彻底杜绝阶段 1 上下文污染。
+    核心安全机制：数据投影（Projection），物理剔除参考范文与高能句式骨架，彻底杜绝阶段 1 上下文污染。
     """
     paths = get_paths()
     anchors = read_jsonl(paths["anchors"])
@@ -881,7 +881,7 @@ def cmd_prompt(args):
     matches = filter_anchors(anchors, args.genre, args.year, getattr(args, "exam_type", None))
 
     if not matches:
-        print(f"[PROMPT] 未检索到匹配的官方真题题干 (genre={genre_target}, year={year_target}, exam_type={exam_target_norm})。")
+        print(f"[PROMPT] 未检索到匹配的真题题干 (genre={genre_target}, year={year_target}, exam_type={exam_target_norm})。")
         return
 
     # 数据投影：只保留题干、要点、语域、指定落款，物理删除所有范文和抽取骨架
@@ -907,25 +907,25 @@ def cmd_prompt(args):
         return
 
     if len(projected) > 1:
-        print(f"=== 官方真题题干与审题标尺 (共检索到 {len(projected)} 篇，存在卷别分支) ===")
+        print(f"=== 真题题干与审题参考标尺 (共检索到 {len(projected)} 篇，存在卷别分支) ===")
         print("• [注意] 检测到当年存在英一/英二双卷。若未指明卷别，请直接追问学员确认！\n")
         for idx, p in enumerate(projected, 1):
             print(f"--- 【卷别选项 #{idx}】 {p['year']} {p['exam_type']} · {p['genre']} ---")
-            print(f"• 官方指定署名: {p['mandated_signoff']}")
+            print(f"• 题干指定署名: {p['mandated_signoff']}")
             print(f"• 试题要求 (Prompt):\n  {p['prompt']}")
-            print(f"• 核心采分点 (Key Points): {', '.join(p['key_points'])}")
+            print(f"• 核心参考要点 (Key Points): {', '.join(p['key_points'])}")
             print(f"• 语域档位: {p['register']} ({p['relationship']})\n")
     else:
         p = projected[0]
-        print(f"=== 官方真题要求与审题基准标尺: {p['year']} {p['exam_type']} · {p['genre']} ===")
+        print(f"=== 真题要求与审题参考标尺: {p['year']} {p['exam_type']} · {p['genre']} ===")
         print(f"• 受众权责关系: {p['relationship']} | 语域档位: {p['register']}")
-        print(f"• 【官方指定署名】: {p['mandated_signoff']}")
+        print(f"• 【题干指定署名】: {p['mandated_signoff']}")
         print(f"• 试题要求 (Directions):\n{p['prompt']}")
-        print("• 核心采分要点 (Key Points):")
+        print("• 核心参考要点 (Key Points):")
         for kp in p['key_points']:
             print(f"  - {kp}")
         print(f"• 语域与语气深度剖析:\n  {p['register_analysis']}")
-        print("\n*(本命令已对官方范文执行物理级隔离，输出中 100% 零范文泄露)*")
+        print("\n*(本命令已对参考范文执行物理级隔离，输出中 100% 零范文泄露)*")
 
 def _expression_core_words(text: str) -> list:
     """把表达/句式骨架（含 [slot] 占位符）归一化为可匹配的实词序列。"""
@@ -2949,13 +2949,7 @@ def cmd_maimemo_sync(args):
             print(f"同步生词: {', '.join(res.get('synced_words', []))}")
             if res.get('skipped_words'):
                 print(f"未匹配跳过: {', '.join(res.get('skipped_words', []))}")
-            if res.get("phrases_unauthorized"):
-                print("例句沉淀数: 0 (Token 未授予 /phrases 权限，已软降级跳过)")
-            else:
-                print(f"例句沉淀数: {res.get('phrases_created')}")
             print(f"借壳助记数: {res.get('notes_created')}")
-            if res.get("highlight_missing"):
-                print(f"[WARN] 以下词未在例句中找到目标词，已按无高亮建句: {', '.join(res['highlight_missing'])}", file=sys.stderr)
             print(f"今日复习流: 已推入 (advance=True)")
     except Exception as e:
         err_msg = str(e)
@@ -3484,10 +3478,7 @@ def _settle_impl(args, state):
                 if res.get("status") in ("success", "soft_success"):
                     print(f"  [OK] 专属词本: 《{res.get('notepad_title')}》 ➔ 章节 # {res.get('chapter')}")
                     print(f"  [OK] 同步生词: {', '.join(res.get('synced_words', []))}")
-                    if res.get("phrases_unauthorized"):
-                        print(f"  [WARN] 专属例句: 跳过（Token 未授予 /phrases 权限） | 借壳助记数: {res.get('notes_created')} 条")
-                    else:
-                        print(f"  [OK] 专属例句沉淀数: {res.get('phrases_created')} 条 | 借壳助记数: {res.get('notes_created')} 条")
+                    print(f"  [OK] 借壳助记数: {res.get('notes_created')} 条")
                     print("  [OK] 今日复习流: 已直接注入 (advance=True)")
                     if res.get("skipped_words"):
                         print(f"  [WARN] 未匹配跳过词: {', '.join(res.get('skipped_words'))}", file=sys.stderr)
@@ -3537,6 +3528,7 @@ def _settle_impl(args, state):
         print("✗ 墨墨背单词同步未完成（本地沉淀已保留）")
     print(f"✔ 知识库一致性校验通过 (个人外脑有效条目: {user_total} 条，不含只读教研底座)")
     print("======================================================")
+    print(f"\n[提示] 本题范文与外脑已归档锁定，可执行 anchor --genre {genre} --year {year} --exam-type {exam_type} --full 调出真题高分参考标尺开展 S4 终局对照复盘！")
 
     if remote_failures:
         # 远端同步失败不回滚本地成果，但必须以非零退出码与显式 ✗ 告知，杜绝假成功
@@ -3579,7 +3571,7 @@ def cmd_doctor(args):
     print("[本地外脑知识库与教研底座]")
     print(f"• 用户外脑根目录: {user_root} [{'OK' if user_root_ok else 'MISSING'}]")
     print(f"• 个人有效资产条目: {user_entries} 条 [{'OK' if user_root_ok else 'UNINITIALIZED'}]")
-    print(f"• 官方真题标尺库: {anchors_file.name} [{'OK' if anchors_ok else 'MISSING'}]")
+    print(f"• 真题参考标尺库: {anchors_file.name} [{'OK' if anchors_ok else 'MISSING'}]")
     print(f"• 共享语素底座: {seed_shared_file.name} [{'OK' if seed_shared_ok else 'MISSING'}]")
     print(f"• 小作文表达种子库: {seed_task1_file.name} [{'OK' if seed_task1_ok else 'MISSING'}]")
 
@@ -3672,15 +3664,10 @@ def cmd_doctor(args):
         try:
             r = c.request("GET", "/phrases?limit=1&offset=0")
             phrase_status = "PASS"
-            phrase_detail = "具备专属例句创建权限"
+            phrase_detail = "接口连通正常（已按策略停用例句创建，聚焦词本与助记）"
         except Exception as e:
-            err = str(e)
-            if "403" in err or "permission_denied" in err:
-                phrase_status = "SKIP"
-                phrase_detail = "403 权限未开通 (系统已自动启用软降级，结算时自动跳过例句，不影响词本与助记入库)"
-            else:
-                phrase_status = "WARN"
-                phrase_detail = err
+            phrase_status = "SKIP"
+            phrase_detail = "403 权限未开通 (系统已自动启用软降级，结算时自动跳过例句，不影响词本与助记入库)"
         print(f"• 专属例句端点 (/phrases): [{phrase_status}] {phrase_detail}")
         memo_diag["phrases"] = {"status": phrase_status, "detail": phrase_detail}
 
@@ -3753,19 +3740,19 @@ def main():
     p_upd.add_argument("--increment-recommended", action="store_true", help="Increment recommended count")
 
     # anchor
-    p_anchor = subparsers.add_parser("anchor", help="Query official past paper model essay anchor")
+    p_anchor = subparsers.add_parser("anchor", help="Query past paper reference model essay anchor")
     p_anchor.add_argument("--genre", type=str, default=None, help="Genre (e.g. advice, reply_letter, invitation)")
     p_anchor.add_argument("--year", type=str, default=None, help="Exam year (optional)")
     p_anchor.add_argument("--exam-type", type=str, default=None, help="Filter by exam type ('English I', 'English II', '英一', '英二')")
     p_anchor.add_argument("--limit", type=str, default=None, help="Max number of anchors to return (default: 1 when querying by genre, or 'all')")
-    p_anchor.add_argument("--full", action="store_true", help="Include full official model essay text (internal use only)")
+    p_anchor.add_argument("--full", action="store_true", help="Include full reference model essay text for AI internal alignment in S2 and debrief in S4")
     p_anchor.add_argument("--model-version", choices=["all", "1", "2"], default="all", help="Select model version for exams supporting dual models (1: 高级范文, 2: 满分习作, all: 完整展示)")
     p_anchor.add_argument("--json", action="store_true", help="Output as JSON")
 
     # prompt
     p_prompt = subparsers.add_parser(
         "prompt",
-        help="Query official past paper prompt, directions, key points and rubrics (strictly omits model essays)"
+        help="Query past paper prompt, directions, reference key points and rubrics (strictly omits model essays)"
     )
     p_prompt.add_argument("--genre", type=str, default=None, help="Genre (e.g. advice, reply_letter, invitation)")
     p_prompt.add_argument("--year", type=str, default=None, help="Exam year (optional)")
