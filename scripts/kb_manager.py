@@ -626,7 +626,11 @@ SALUTATION_RE = re.compile(r'^(dear\b|to\b|notice\b|announcement\b)', re.IGNOREC
 SIGNOFF_PATTERNS = (
     r'^(best\s+wishes|kind\s+regards|best\s+regards|warmest\s+regards|yours\s+sincerely|sincerely\s+yours|yours\s+faithfully|yours\s+truly|sincerely|regards|warm\s+regards|yours)[,\.]?$',
     r'^(li\s+ming|zhang\s+wei|wang\s+hua)[,\.]?$',
-    r'^(the\s+student\s+union|postgraduate\s+association)[,\.]?$',
+    r'^(the\s+)?(students?[\'’]?\s+union|postgraduates?[\'’]?\s+association|organizing\s+committee|volunteer\s+(recruitment\s+)?office|editorial\s+department)[,\.]?$',
+)
+NOTICE_DATE_LINE_RE = re.compile(
+    r'^(date:\s*)?((january|february|march|april|may|june|july|august|september|october|november|december)\b|\b\d{1,2}(st|nd|rd|th)?,\s+\d{4}$|\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b)',
+    re.IGNORECASE
 )
 
 
@@ -648,6 +652,11 @@ def split_essay_body(content: str, strip_markdown_tail: bool = False) -> tuple:
         candidate_lines = raw_lines[1:]
     else:
         candidate_lines = raw_lines[:]
+
+    # 告示/通知特殊排版：标题下一行为独立日期行，剥离出正文段落列表
+    if salutation and re.match(r'^(notice|announcement)\b', salutation, re.IGNORECASE):
+        if candidate_lines and NOTICE_DATE_LINE_RE.search(candidate_lines[0]):
+            candidate_lines.pop(0)
 
     signoff = []
     while candidate_lines:
@@ -2738,6 +2747,8 @@ def cmd_check_essay(args):
     sig_desc = detected_signature.strip() if detected_signature else "未检出"
     if expected_signoff:
         sig_check = f"题干法定 '{expected_signoff}' | [{'PASS' if not any('署名' in i for i in format_issues) else 'FAIL'}]"
+    elif is_notice and detected_signature and not any('署名' in i for i in format_issues):
+        sig_check = "告示类发布机构署名 [PASS]"
     elif signoff_note:
         sig_check = f"未校验（{signoff_note}）"
     else:
